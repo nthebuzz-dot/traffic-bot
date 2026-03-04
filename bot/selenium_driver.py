@@ -993,6 +993,7 @@ class SeleniumDriver:
             # Clean up the temp dir if Chrome failed to start
             if self._tmp_dir:
                 shutil.rmtree(self._tmp_dir, ignore_errors=True)
+                _unregister_tmp_dir(self._tmp_dir)
                 self._tmp_dir = None
 
             # Build a helpful error message using the actual binary names found
