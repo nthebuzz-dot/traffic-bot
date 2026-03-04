@@ -434,6 +434,87 @@ def _versions_match(browser_bin: str, driver_bin: str) -> bool:
     return True
 
 
+def _auto_install_chromium() -> bool:
+    """
+    Attempt to automatically install Chromium + chromedriver on Ubuntu/Debian.
+
+    Called when no browser binary is found on the system.  Requires sudo
+    (passwordless sudo or running as root).
+
+    Returns True if installation succeeded, False otherwise.
+    """
+    import platform
+    if platform.system() != "Linux":
+        return False
+
+    # Check if apt is available (Ubuntu/Debian)
+    if not shutil.which("apt"):
+        return False
+
+    logger.info(
+        "No Chrome/Chromium found — attempting automatic installation via apt..."
+    )
+
+    try:
+        # Remove snap Chromium first (if present) — it can't be used with Selenium
+        if shutil.which("snap"):
+            try:
+                result = subprocess.run(
+                    ["snap", "list", "chromium"],
+                    capture_output=True, timeout=10
+                )
+                if result.returncode == 0:
+                    logger.info("Removing snap Chromium (incompatible with Selenium)...")
+                    subprocess.run(
+                        ["sudo", "snap", "remove", "chromium"],
+                        timeout=60, check=True
+                    )
+            except Exception:
+                pass  # snap not installed or snap remove failed — continue
+
+        # Update apt cache
+        subprocess.run(
+            ["sudo", "apt", "update", "-qq"],
+            timeout=120, check=True
+        )
+
+        # Detect Ubuntu version and install the right package names
+        try:
+            ver_out = subprocess.check_output(
+                ["lsb_release", "-rs"], stderr=subprocess.DEVNULL, timeout=5
+            ).decode().strip()
+            major = int(ver_out.split(".")[0])
+        except Exception:
+            major = 0
+
+        if major >= 22:
+            pkgs = ["chromium", "chromium-driver"]
+        else:
+            pkgs = ["chromium-browser", "chromium-chromedriver"]
+
+        logger.info(f"Installing {' '.join(pkgs)}...")
+        subprocess.run(
+            ["sudo", "apt", "install", "-y"] + pkgs,
+            timeout=300, check=True
+        )
+        logger.info("Chromium installed successfully.")
+        return True
+
+    except subprocess.CalledProcessError as e:
+        logger.warning(f"Auto-install failed: {e}")
+        logger.warning(
+            "Please install manually:\n"
+            "  sudo apt update\n"
+            "  sudo apt install -y chromium chromium-driver   # Ubuntu 22.04+\n"
+            "  # OR: sudo apt install -y chromium-browser chromium-chromedriver  # Ubuntu 20.04\n"
+            "  # OR run: bash scripts/ubuntu_setup.sh"
+        )
+        return False
+    except Exception as e:
+        logger.warning(f"Auto-install skipped: {e}")
+        return False
+
+
 def _resolve_browser_and_driver(
     explicit_browser: Optional[str] = None,
 ) -> Tuple[Optional[str], Optional[str]]:
@@ -446,24 +527,39 @@ def _resolve_browser_and_driver(
     2. Walk the known (browser, driver) pairs and return the first where
        both binaries exist.
     3. Search PATH for any browser candidate and any driver candidate
-       independently (last resort — may mismatch on snap systems).
+       independently.
+    4. If no browser found on Linux/Ubuntu, attempt auto-install via apt
+       and retry steps 2–3.
     """
-    # --- 0. Snap Chromium detection — fail fast with a clear message ---
+    # --- 0. Snap Chromium detection — attempt auto-fix, then fail ---
     for snap_path in _SNAP_BROWSER_PATHS:
         if _binary_exists(snap_path):
-            raise RuntimeError(
-                "Snap Chromium detected but it CANNOT be used with Selenium.\n"
-                "The snap sandbox prevents chromedriver from launching the browser.\n"
-                "\n"
-                "Fix — replace snap Chromium with the apt version:\n"
-                "  sudo snap remove chromium\n"
-                "  sudo apt update\n"
-                "  sudo apt install -y chromium chromium-driver        # Ubuntu 22.04+\n"
-                "  # OR for Ubuntu 20.04:\n"
-                "  sudo apt install -y chromium-browser chromium-chromedriver\n"
-                "\n"
-                "Then restart the dashboard."
+            logger.warning(
+                "Snap Chromium detected — it CANNOT be used with Selenium. "
+                "Attempting to replace it with the apt version automatically..."
             )
+            try:
+                subprocess.run(
+                    ["sudo", "snap", "remove", "chromium"],
+                    timeout=60, check=True
+                )
+                logger.info("Snap Chromium removed. Installing apt Chromium...")
+                _auto_install_chromium()
+            except Exception as e:
+                raise RuntimeError(
+                    "Snap Chromium detected but it CANNOT be used with Selenium.\n"
+                    "The snap sandbox prevents chromedriver from launching the browser.\n"
+                    "\n"
+                    "Auto-fix failed. Please run manually:\n"
+                    "  sudo snap remove chromium\n"
+                    "  sudo apt update\n"
+                    "  sudo apt install -y chromium chromium-driver        # Ubuntu 22.04+\n"
+                    "  # OR for Ubuntu 20.04:\n"
+                    "  sudo apt install -y chromium-browser chromium-chromedriver\n"
+                    "\n"
+                    "Or just run:  bash scripts/ubuntu_setup.sh"
+                ) from e
+            break  # re-check below after install
 
     # --- 1. Explicit browser path ---
     if explicit_browser and _binary_exists(explicit_browser):
@@ -508,23 +604,31 @@ def _resolve_browser_and_driver(
     browser = _find_on_path(_BROWSER_CANDIDATES)
     driver = _find_on_path(_DRIVER_CANDIDATES)
 
+    if not browser:
+        # --- 4. Auto-install on Linux/Ubuntu ---
+        if _auto_install_chromium():
+            # Retry after install
+            browser = _find_on_path(_BROWSER_CANDIDATES)
+            driver = _find_on_path(_DRIVER_CANDIDATES)
+
     if browser:
         logger.info(f"Browser binary : {browser}")
         ver = _get_version(browser)
         if ver:
             logger.info(f"Browser version: {ver}")
     else:
-        logger.warning(
-            "No Chrome/Chromium binary found. "
-            "Install with: sudo apt install -y chromium chromium-driver"
+        logger.error(
+            "No Chrome/Chromium binary found and auto-install failed.\n"
+            "Please install manually:\n"
+            "  bash scripts/ubuntu_setup.sh\n"
+            "  # OR: sudo apt install -y chromium chromium-driver"
         )
 
     if driver:
         logger.info(f"ChromeDriver   : {driver}")
     else:
         logger.warning(
-            "No chromedriver found. "
-            "Install with: sudo apt install -y chromium-driver"
+            "No chromedriver found — will use webdriver-manager to download it automatically."
         )
 
     return browser, driver
@@ -712,7 +816,10 @@ class SeleniumDriver:
         options.add_argument("--mute-audio")
         options.add_argument("--no-first-run")
         options.add_argument("--safebrowsing-disable-auto-update")
-        options.add_argument("--single-process")   # helps in low-memory VPS environments
+        # NOTE: --single-process is intentionally NOT used here.
+        # It was deprecated in Chrome 120+ and causes random crashes in
+        # concurrent sessions.  Use --disable-dev-shm-usage instead for
+        # low-memory VPS environments (already set above).
 
         # Suppress "Chrome is being controlled by automated software" bar
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -800,14 +907,23 @@ class SeleniumDriver:
             if self._tmp_dir:
                 shutil.rmtree(self._tmp_dir, ignore_errors=True)
                 self._tmp_dir = None
+
+            # Build a helpful error message using the actual binary names found
+            browser_cmd = browser_bin or "chromium"
+            driver_cmd = driver_bin or "chromedriver"
             logger.error(
                 f"WebDriver initialisation failed: {e}\n"
-                "Troubleshooting:\n"
-                "  1. Check browser version:   chromium-browser --version\n"
-                "  2. Check driver version:    chromedriver --version\n"
-                "  3. If versions mismatch, the bot will auto-download the correct driver\n"
-                "     via webdriver-manager (requires internet access).\n"
-                "  4. Or set 'Chromium Path' in the dashboard to your browser binary path."
+                "Diagnosis:\n"
+                f"  Browser : {browser_bin or '(not found)'}\n"
+                f"  Driver  : {driver_bin or '(not found — will use webdriver-manager)'}\n"
+                "\n"
+                "If the browser was found but Chrome still failed to start:\n"
+                f"  1. Verify browser version:  {browser_cmd} --version\n"
+                f"  2. Verify driver version:   {driver_cmd} --version\n"
+                "  3. Version mismatch is handled automatically via webdriver-manager.\n"
+                "  4. On a server, ensure Headless mode is ON.\n"
+                "  5. If using a custom browser path, verify it in the dashboard settings.\n"
+                "  6. Run 'bash scripts/ubuntu_setup.sh' to reinstall Chromium cleanly."
             )
             raise
 

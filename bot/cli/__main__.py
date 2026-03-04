@@ -62,6 +62,12 @@ Examples:
         help='Number of sessions to run'
     )
     parser.add_argument(
+        '--concurrent', '--concurrent-sessions',
+        type=int,
+        dest='concurrent_sessions',
+        help='Number of sessions to run simultaneously (default: 1)'
+    )
+    parser.add_argument(
         '--duration',
         type=int,
         help='Total duration in seconds'
@@ -91,6 +97,13 @@ Examples:
         metavar='PROXY_URL',
         help='Proxy URL (repeat for multiple proxies)'
     )
+    parser.add_argument(
+        '--referrer',
+        action='append',
+        dest='referrers',
+        metavar='REFERRER_URL',
+        help='Custom referrer URL (repeat for multiple); ~80%% of sessions use these'
+    )
 
     args = parser.parse_args()
 
@@ -119,6 +132,8 @@ Examples:
             config.target_url = args.url
         if args.sessions is not None:
             config.sessions_count = args.sessions
+        if args.concurrent_sessions is not None:
+            config.concurrent_sessions = args.concurrent_sessions
         if args.duration is not None:
             config.duration_seconds = args.duration
         if args.session_duration is not None:
@@ -127,6 +142,8 @@ Examples:
             config.headless = args.headless
         if args.proxies:
             config.proxies = args.proxies
+        if args.referrers:
+            config.referrers = args.referrers
 
         config.validate()
 

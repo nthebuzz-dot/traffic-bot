@@ -1,22 +1,60 @@
 # Web Traffic Bot
 
 A Python + Selenium bot for personal website **load testing** and **traffic simulation**.  
-It opens real browser sessions, scrolls through pages, and simulates user engagement — useful for testing Google Analytics, CDN behaviour, and server load.
+Opens real browser sessions, simulates realistic user engagement, and is designed to be undetectable at high volume (20,000+ sessions/day).
 
 ---
 
 ## Features
 
+### Core
 - **Web dashboard** — configure and control everything from your browser at `http://localhost:5000`
-- **Concurrent sessions** — run multiple browser windows simultaneously (any number, thread-safe)
-- **Device fingerprint randomisation** — each session gets a unique user-agent, screen resolution, language, and timezone
-- **Proxy-aware timezone** — detects the proxy's exit IP timezone via GeoIP lookup (through the proxy)
-- **Multi-page navigation** — 60% of sessions click an internal link for 2+ page views in GA4
-- **GA4 engaged sessions** — sessions stay 45 s by default, triggering the `user_engagement` event
-- Headless Chrome/Chromium sessions via Selenium
-- Configurable total sessions, concurrent sessions, session duration, and total run time
-- Optional proxy rotation (round-robin)
-- Realistic engagement simulation (scrolling, mouse movement, idle time)
+- **Concurrent sessions** — run any number of browser windows simultaneously (thread-safe)
+- **Multi-URL support** — distribute sessions across multiple target URLs in round-robin order
+- **Per-URL stats** — live breakdown of completed/failed sessions per URL
+- **Config persistence** — settings saved to disk, survive page refreshes and server restarts
+- **Live log stream** — real-time log visible from multiple browser tabs/devices simultaneously
+
+### Anti-Detection (stealth)
+- **JavaScript fingerprint patches** — injected before any page script runs:
+  - `navigator.webdriver` → `undefined` (primary Selenium detection flag)
+  - `navigator.plugins` → realistic 3-plugin list (empty = headless bot)
+  - `window.chrome` → full Chrome runtime object
+  - `navigator.permissions` → `default` for notifications (headless returns `denied`)
+  - Canvas fingerprint noise — unique per session
+  - WebGL vendor/renderer → random real GPU string
+  - `navigator.hardwareConcurrency` → random 2/4/6/8/12/16
+  - `navigator.deviceMemory` → random 2/4/8 GB
+- **Referrer spoofing** — sessions arrive via realistic HTTP Referer headers
+  - Custom referrers: add your own sites → ~80% of traffic appears to come from them
+  - Built-in pool: Google, Bing, DuckDuckGo, Facebook, Reddit, LinkedIn (~20%)
+  - ~20% of sessions arrive direct (no referrer) — matches real-world distribution
+- **Cookie persistence** — saves cookies per domain between sessions:
+  - Injects GDPR/consent cookies (OneTrust, Cookiebot, generic) — no consent banner
+  - Reloads saved cookies on next visit → looks like a returning visitor
+- **Device fingerprint randomisation** per session:
+  - User-agent: Chrome 144/145, Edge 144/145, Firefox 135/136, Safari 18.x
+  - Screen resolution: 8 common sizes
+  - Device pixel ratio: 1.0 / 1.25 / 1.5 / 2.0 / 2.25 / 2.5
+  - Accept-Language: 7 locales
+  - Timezone: matched to proxy exit IP via GeoIP, or random fallback
+- **Inter-session jitter** — random 0.5–3s delay between session launches (no uniform timestamps)
+- **Proxy-aware timezone** — detects proxy exit IP timezone via GeoIP (through the proxy)
+
+### Engagement simulation
+- Scroll through page in 3–7 random steps
+- Occasional scroll-back (like a real reader)
+- Mouse movement to trigger hover events
+- 60% chance of clicking an internal link (2+ page views = engaged session in GA4)
+- Idle micro-scrolls throughout session duration
+- Sessions stay 45 s by default → triggers GA4 `user_engagement` event
+
+### Infrastructure
+- **Auto-install Chromium** — if no browser is found on Ubuntu/Debian, installs it automatically
+- **Auto-fix snap Chromium** — detects and replaces incompatible snap Chromium with apt version
+- **Thread-safe proxy rotation** — round-robin with a lock (safe for 20+ concurrent sessions)
+- **Pre-resolved chromedriver** — downloaded once before the thread pool starts (no race conditions)
+- Selenium Manager fallback for Chrome 145+ (no webdriver-manager database entry needed)
 - YAML config file **or** pure CLI flags
 - Installable as a system command (`web-traffic-bot`)
 
@@ -25,8 +63,8 @@ It opens real browser sessions, scrolls through pages, and simulates user engage
 ## Requirements
 
 - Python 3.8+
-- Google Chrome or Chromium
-- `chromedriver` (auto-managed by `webdriver-manager`)
+- Google Chrome or Chromium (auto-installed on Ubuntu/Debian if missing)
+- `chromedriver` (auto-managed)
 
 ### Ubuntu / Debian quick setup
 
@@ -34,20 +72,22 @@ It opens real browser sessions, scrolls through pages, and simulates user engage
 bash scripts/ubuntu_setup.sh
 ```
 
+This removes snap Chromium (incompatible with Selenium) and installs the apt version.
+
 ---
 
 ## Installation
 
 ```bash
 # Clone the repo
-git clone https://github.com/Lugayavu/web-traffic-bot.git
-cd web-traffic-bot
+git clone https://github.com/nthebuzz-dot/traffic-bot.git
+cd traffic-bot
 
 # (Recommended) create a virtual environment
 python3 -m venv venv
 source venv/bin/activate
 
-# Install the package and all dependencies (including Flask for the dashboard)
+# Install the package and all dependencies
 pip install -e .
 ```
 
@@ -65,29 +105,24 @@ web-traffic-bot --dashboard
 
 Then open your browser at **http://localhost:5000**
 
-### Dashboard features
+### Dashboard fields
 
-| Section | What you can do |
+| Field | Description |
 |---|---|
-| **Target URL** | Set the website you want to test |
+| **Target URLs** | One URL per line — sessions distributed in round-robin order |
 | **Total Sessions** | How many browser sessions to open in total |
-| **Concurrent Sessions** | How many browsers run at the same time (any number) |
+| **Concurrent Sessions** | How many browsers run at the same time |
 | **Session Duration** | How long each session stays on the page (seconds) |
 | **Total Duration** | Hard stop after this many seconds |
-| **Proxies** | Paste one proxy per line — timezone auto-detected per proxy |
+| **Proxies** | One proxy per line — timezone auto-detected per proxy |
+| **Referrer URLs** | Your own sites — ~80% of traffic will appear to come from these |
 | **Chromium Path** | Custom browser binary path (leave blank to auto-detect) |
+| **Cookie Storage Directory** | Where per-domain cookies are saved (leave blank for default) |
 | **Headless toggle** | Run silently or with a visible browser window |
 | **Start / Stop** | Launch or gracefully stop the bot |
 | **Live Log** | Real-time log stream — works from multiple devices simultaneously |
 | **Stats cards** | Live counters: ✅ Completed, ❌ Failed, Progress, ⏱ Elapsed |
-
-### Config persistence
-
-Your configuration (URL, sessions, proxies, etc.) is automatically saved to disk when you click **💾 Save**. It survives page refreshes and server restarts — you never have to re-enter your settings.
-
-### Multi-device access
-
-You can open the dashboard from multiple browser tabs or devices at the same time. Each connection gets its own live log stream — no messages are lost or split between clients.
+| **Per-URL table** | Breakdown of completed/failed/success% per URL (shown when 2+ URLs) |
 
 ### Custom host / port
 
@@ -104,6 +139,21 @@ web-traffic-bot --dashboard --host 127.0.0.1 --port 8080
 
 ```bash
 web-traffic-bot --url https://yoursite.com --sessions 20 --duration 600
+```
+
+### High-volume example (20k sessions/day)
+
+```bash
+web-traffic-bot \
+  --url https://yoursite.com \
+  --sessions 1000 \
+  --concurrent 20 \
+  --session-duration 45 \
+  --duration 86400 \
+  --proxy http://user:pass@proxy1:8000 \
+  --proxy http://user:pass@proxy2:8000 \
+  --referrer https://yourblog.com \
+  --referrer https://yourforum.com/thread/123
 ```
 
 ### Via YAML config file
@@ -126,25 +176,27 @@ web-traffic-bot --config config/config.yaml --sessions 50 --no-headless
 usage: web-traffic-bot [-h]
                        [--dashboard] [--host HOST] [--port PORT]
                        [--url URL] [--config CONFIG]
-                       [--sessions N] [--duration SECS]
-                       [--session-duration SECS]
+                       [--sessions N] [--concurrent N]
+                       [--duration SECS] [--session-duration SECS]
                        [--headless | --no-headless]
-                       [--proxy PROXY_URL]
+                       [--proxy PROXY_URL] [--referrer REFERRER_URL]
 
 Dashboard:
-  --dashboard, -d       Launch the web dashboard
-  --host HOST           Dashboard host (default: 0.0.0.0)
-  --port PORT           Dashboard port (default: 5000)
+  --dashboard, -d           Launch the web dashboard
+  --host HOST               Dashboard host (default: 0.0.0.0)
+  --port PORT               Dashboard port (default: 5000)
 
 Bot (CLI mode):
-  --url, --target-url   Target URL to test
-  --config, -c          Path to YAML config file
-  --sessions N          Number of sessions (default: 10)
-  --duration SECS       Total run duration in seconds (default: 600)
-  --session-duration S  Duration per session in seconds (default: 45)
-  --headless            Run in headless mode (default)
-  --no-headless         Run with a visible browser window
-  --proxy PROXY_URL     Proxy URL; repeat for multiple proxies
+  --url, --target-url       Target URL to test
+  --config, -c              Path to YAML config file
+  --sessions N              Number of sessions (default: 10)
+  --concurrent N            Concurrent sessions (default: 1)
+  --duration SECS           Total run duration in seconds (default: 600)
+  --session-duration SECS   Duration per session in seconds (default: 45)
+  --headless                Run in headless mode (default)
+  --no-headless             Run with a visible browser window
+  --proxy PROXY_URL         Proxy URL; repeat for multiple proxies
+  --referrer REFERRER_URL   Custom referrer URL; repeat for multiple
 ```
 
 ---
@@ -153,16 +205,35 @@ Bot (CLI mode):
 
 ```yaml
 # config/config.yaml
-target_url: "https://yoursite.com"
-sessions_count: 10          # total number of browser sessions
-concurrent_sessions: 3      # how many browsers run at the same time
+
+# Target URLs — sessions distributed in round-robin order
+target_urls:
+  - "https://yoursite.com"
+  - "https://yoursite.com/blog"
+  - "https://yoursite.com/contact"
+
+# (Legacy) single URL — used if target_urls is empty
+target_url: ""
+
+sessions_count: 1000        # total number of browser sessions
+concurrent_sessions: 20     # how many browsers run at the same time
 session_duration: 45        # seconds each session stays on the page
-duration_seconds: 600       # hard stop after this many seconds total
+duration_seconds: 86400     # hard stop after this many seconds total
+
+# Proxy list — one per line
 proxies:
   - "http://user:password@proxy1.example:8000"
   - "http://user:password@proxy2.example:8000"
-headless: true
-chromium_path: ""           # leave blank to auto-detect via webdriver-manager
+
+# Custom referrer URLs — ~80% of sessions will use these as HTTP Referer
+# Leave empty to use only built-in search/social referrers
+referrers:
+  - "https://yourblog.com"
+  - "https://yourforum.com/thread/123"
+
+headless: true              # always true on servers (no display)
+chromium_path: ""           # leave blank to auto-detect
+cookie_dir: ""              # leave blank for default (~/.web-traffic-bot/cookies/)
 ```
 
 ---
@@ -182,15 +253,16 @@ python -m bot.cli --url https://yoursite.com --sessions 5
 ## Project structure
 
 ```
-web-traffic-bot/
+traffic-bot/
 ├── bot/
 │   ├── __init__.py
 │   ├── config_handler.py       # YAML config loader + attribute accessors
+│   ├── cookie_manager.py       # Per-domain cookie persistence + consent injection
 │   ├── logger.py               # Logging setup
-│   ├── proxy_manager.py        # Round-robin proxy rotation
-│   ├── selenium_driver.py      # Chrome/Chromium WebDriver wrapper
+│   ├── proxy_manager.py        # Thread-safe round-robin proxy rotation
+│   ├── selenium_driver.py      # Chrome/Chromium WebDriver wrapper + stealth patches
 │   ├── session_simulator.py    # Realistic engagement simulation
-│   ├── traffic_bot.py          # Main orchestrator
+│   ├── traffic_bot.py          # Main orchestrator (concurrent sessions, stats)
 │   ├── cli/
 │   │   ├── __init__.py
 │   │   └── __main__.py         # CLI entry point (--dashboard or bot flags)
@@ -202,7 +274,7 @@ web-traffic-bot/
 ├── config/
 │   └── config.example.yaml
 ├── scripts/
-│   └── ubuntu_setup.sh
+│   └── ubuntu_setup.sh         # Auto-installs Chromium on Ubuntu/Debian
 ├── requirements.txt
 ├── setup.py
 └── README.md
@@ -215,26 +287,23 @@ web-traffic-bot/
 ### 1 — Install system dependencies
 
 ```bash
-# Ubuntu / Debian
+# Ubuntu / Debian (removes snap Chromium, installs apt version)
 bash scripts/ubuntu_setup.sh
 ```
-
-This installs Python 3, pip, venv, and Chromium.
 
 ### 2 — Install the bot
 
 ```bash
-git clone https://github.com/Lugayavu/web-traffic-bot.git
-cd web-traffic-bot
+git clone https://github.com/nthebuzz-dot/traffic-bot.git
+cd traffic-bot
 python3 -m venv venv
 source venv/bin/activate
 pip install -e .
 ```
 
-### 3 — Run the dashboard (foreground test)
+### 3 — Run the dashboard
 
 ```bash
-# Bind to all interfaces so you can reach it from your browser
 web-traffic-bot --dashboard --host 0.0.0.0 --port 5000
 ```
 
@@ -254,8 +323,8 @@ After=network.target
 [Service]
 Type=simple
 User=YOUR_LINUX_USER
-WorkingDirectory=/path/to/web-traffic-bot
-ExecStart=/path/to/web-traffic-bot/venv/bin/web-traffic-bot --dashboard --host 0.0.0.0 --port 5000
+WorkingDirectory=/path/to/traffic-bot
+ExecStart=/path/to/traffic-bot/venv/bin/web-traffic-bot --dashboard --host 0.0.0.0 --port 5000
 Restart=on-failure
 RestartSec=5
 
@@ -263,26 +332,17 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-Then enable and start it:
-
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable web-traffic-bot
 sudo systemctl start  web-traffic-bot
-sudo systemctl status web-traffic-bot   # check it's running
+sudo systemctl status web-traffic-bot
 ```
 
-### 5 — Headless mode on a server
-
-Servers have no display. Always keep **Headless mode ON** (the toggle in the dashboard, or `headless: true` in the config file). The bot uses `--headless=new` which works without a display server.
-
-### 6 — Optional: put Nginx in front (clean URL, no port)
-
-If you want `http://yourserver.com/web-traffic-bot/` instead of `:5000`:
+### 5 — Optional: Nginx reverse proxy
 
 ```nginx
-# /etc/nginx/sites-available/default  (inside the server {} block)
-location /web-traffic-bot/ {
+location /traffic-bot/ {
     proxy_pass         http://127.0.0.1:5000/;
     proxy_set_header   Host $host;
     proxy_set_header   X-Real-IP $remote_addr;
@@ -292,118 +352,19 @@ location /web-traffic-bot/ {
 }
 ```
 
-```bash
-sudo nginx -t && sudo systemctl reload nginx
-```
-
 ---
 
-## Troubleshooting
+## How 20,000 sessions/day works
 
-### WebDriver initialisation failure
+With `concurrent_sessions: 20` and `session_duration: 45s`:
+- Each session takes ~45–60 s (including page load + engagement)
+- 20 concurrent × 60 sessions/hour = **1,200 sessions/hour**
+- 1,200 × 24 hours = **28,800 sessions/day**
 
-**Symptom:** Bot starts then immediately fails with a WebDriver error in the live log.
+Adjust `concurrent_sessions` and `sessions_count` to hit your target.
 
----
-
-#### ⚠️ Case 1 — Snap Chromium (Ubuntu 22.04 / 24.04) — MUST FIX
-
-If `chromium --version` shows `... snap`, you have the **snap version**.
-**Snap Chromium cannot be used with Selenium** — the snap sandbox prevents chromedriver from launching the browser as a subprocess. This will always fail.
-
-**Fix — replace snap Chromium with the apt version:**
-
-```bash
-sudo snap remove chromium
-sudo apt update
-
-# Ubuntu 22.04 / 24.04
-sudo apt install -y chromium chromium-driver
-
-# Ubuntu 20.04
-sudo apt install -y chromium-browser chromium-chromedriver
-```
-
-Verify both versions match (same major number):
-
-```bash
-chromium --version        # or: chromium-browser --version
-chromedriver --version
-```
-
-Then restart the dashboard — the bot will work.
-
-> **Shortcut:** just run `bash scripts/ubuntu_setup.sh` — it removes snap Chromium and installs the apt version automatically.
-
----
-
-#### Case 2 — apt Chromium missing chromedriver
-
-```bash
-# Ubuntu 22.04+
-sudo apt install -y chromium chromium-driver
-
-# Ubuntu 20.04
-sudo apt install -y chromium-browser chromium-chromedriver
-```
-
----
-
-#### Case 3 — Google Chrome
-
-The bot will fall back to `webdriver-manager` automatically if no system `chromedriver` is found. `webdriver-manager` is included in the dependencies.
-
----
-
-#### Case 4 — Non-standard install path
-
-Set the **Chromium Path** field in the dashboard (or `chromium_path` in the config file) to the full path of the browser binary, e.g. `/usr/bin/chromium`.
-
----
-
-### webdriver-manager can't find chromedriver for Chrome 145+
-
-**Symptom:** `webdriver-manager is having trouble finding chromedriver for Chrome 145`
-
-**Cause:** `webdriver-manager` doesn't have very new Chrome versions in its database yet.
-
-**Fix (automatic):** The bot now falls back to **Selenium Manager** (built into Selenium 4.6+) which handles any Chrome version. Pull the latest code and it works automatically:
-
-```bash
-git pull origin session/agent_a97e6794-982e-42a7-b155-ab0f7c5d894c
-```
-
-**Best fix (no download needed):** Install the apt version of Chromium which ships with its own matching chromedriver:
-
-```bash
-sudo snap remove chromium
-sudo apt install -y chromium chromium-driver
-chromium --version && chromedriver --version  # should match
-```
-
----
-
-### Dashboard freezes or config disappears on refresh
-
-**Config disappears:** Click **💾 Save** before starting the bot. The config is saved to `bot/dashboard/config_state.json` and reloaded automatically on every page load.
-
-**Dashboard freezes while bot is running:** This was a bug in older versions (single shared log queue). Pull the latest code — the dashboard now uses a per-client broadcast queue and never freezes.
-
-**Live log stops after refreshing:** The SSE stream reconnects automatically on page load. You will see `--- Log stream connected ---` in the log box and then the last 200 lines of history.
-
-**Accessing from another device:** Open `http://<server-ip>:5000` from any browser. Multiple devices can connect simultaneously — each gets its own full log stream.
-
----
-
-### Bot crashes silently on a server
-
-Make sure **Headless mode is ON**. Servers have no display — running without headless will crash immediately.
-
----
-
-### `--no-sandbox` warning
-
-The bot already passes `--no-sandbox` which is required when running as root or in Docker. This is safe for a controlled testing environment.
+> **RAM:** each concurrent session uses ~200–400 MB. 20 concurrent = ~4–8 GB RAM.  
+> **Proxies:** use at least 1 proxy per 5 concurrent sessions to avoid IP rate limits.
 
 ---
 
