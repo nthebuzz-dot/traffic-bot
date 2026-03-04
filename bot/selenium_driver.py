@@ -398,6 +398,41 @@ def _get_proxy_timezone(proxy_url: Optional[str]) -> Optional[str]:
     return None
 
 
+def _normalise_proxy_url(proxy: str) -> str:
+    """
+    Normalise a proxy URL for Chrome's --proxy-server flag.
+
+    Chrome's --proxy-server flag accepts:
+      http://host:port
+      https://host:port
+      socks4://host:port
+      socks5://host:port
+      host:port  (defaults to http)
+
+    Common issues:
+    - Residential proxies often use SOCKS5 but are entered as http://
+    - Some proxies are entered without a scheme (just host:port)
+    - net::ERR_NO_SUPPORTED_PROXIES means Chrome can't use the proxy protocol
+
+    This function:
+    1. Adds http:// if no scheme is present
+    2. Preserves socks4/socks5 schemes
+    3. Strips trailing slashes that confuse Chrome
+
+    Note: If you get ERR_NO_SUPPORTED_PROXIES with http:// proxies, try
+    changing the scheme to socks5:// in the proxy URL.
+    """
+    proxy = proxy.strip().rstrip("/")
+    if not proxy:
+        return proxy
+
+    # If no scheme, default to http
+    if "://" not in proxy:
+        proxy = f"http://{proxy}"
+
+    return proxy
+
+
 # ---------------------------------------------------------------------------
 # Known browser / driver binary locations (checked in order)
 # ---------------------------------------------------------------------------
@@ -984,8 +1019,9 @@ class SeleniumDriver:
         logger.debug(f"Timezone: {tz}")
 
         if self.proxy:
-            logger.info(f"Setting proxy: {self.proxy}")
-            options.add_argument(f"--proxy-server={self.proxy}")
+            proxy_arg = _normalise_proxy_url(self.proxy)
+            logger.info(f"Setting proxy: {proxy_arg}")
+            options.add_argument(f"--proxy-server={proxy_arg}")
 
         return options
 
@@ -1119,20 +1155,26 @@ class SeleniumDriver:
             if referrer:
                 # Use CDP Page.navigate with the referrer header so the target
                 # site sees it in the HTTP Referer header.
-                # CDP navigate is asynchronous — we must wait for the page to
-                # finish loading before proceeding.
+                # CDP navigate is asynchronous — we must wait for:
+                #   1. document.readyState == 'complete'
+                #   2. document.location.href to leave about:blank
+                # Both are needed because cookies can only be set once the
+                # browser has committed to the target domain.
                 try:
                     self.driver.execute_cdp_cmd(
                         "Page.navigate",
                         {"url": url, "referrer": referrer},
                     )
                     logger.debug(f"Referrer: {referrer}")
-                    # Wait up to 30 s for document.readyState == 'complete'
+                    # Wait for the page to leave about:blank and finish loading
                     try:
                         WebDriverWait(self.driver, 30).until(
-                            lambda d: d.execute_script(
-                                "return document.readyState"
-                            ) == "complete"
+                            lambda d: (
+                                d.execute_script("return document.location.href")
+                                not in ("about:blank", "")
+                                and d.execute_script("return document.readyState")
+                                == "complete"
+                            )
                         )
                     except Exception:
                         pass  # timeout or JS error — continue anyway
