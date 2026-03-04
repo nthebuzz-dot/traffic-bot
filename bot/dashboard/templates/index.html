@@ -424,6 +424,16 @@
       </div>
 
       <div class="form-group">
+        <label>Referrer URLs <span style="color:var(--muted);font-size:.75rem;">(one per line, optional)</span></label>
+        <textarea id="referrers" rows="4"
+          placeholder="https://yourblog.com&#10;https://yourforum.com/thread/123&#10;https://yournewsletter.com">{{ referrers_str }}</textarea>
+        <div class="field-hint">
+          Traffic will appear to come from these URLs (~80% of sessions).
+          Leave blank to use built-in search/social referrers only.
+        </div>
+      </div>
+
+      <div class="form-group">
         <label>Chromium Path <span style="color:var(--muted);font-size:.75rem;">(leave blank to auto-detect)</span></label>
         <input type="text" id="chromium_path" placeholder="/usr/bin/chromium"
                value="{{ config.chromium_path or '' }}" />
@@ -558,6 +568,7 @@ function getFormConfig() {
     session_duration:    parseInt($('session_duration').value) || 45,
     duration_seconds:    parseInt($('duration_seconds').value) || 600,
     proxies:             $('proxies').value.trim(),
+    referrers:           $('referrers').value.trim(),
     headless:            $('headless').checked,
     chromium_path:       $('chromium_path').value.trim(),
     cookie_dir:          $('cookie_dir').value.trim(),

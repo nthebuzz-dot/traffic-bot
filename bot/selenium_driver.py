@@ -636,20 +636,27 @@ class SeleniumDriver:
 
     def __init__(self, headless: bool = True, proxy: Optional[str] = None,
                  chromium_path: Optional[str] = None,
-                 driver_path: Optional[str] = None):
+                 driver_path: Optional[str] = None,
+                 custom_referrers: Optional[list] = None):
         """
         Args:
-            headless:     Run Chrome without a visible window.
-            proxy:        Proxy URL (e.g. 'http://user:pass@host:port').
-            chromium_path: Path to the Chrome/Chromium binary (auto-detected if None).
-            driver_path:  Pre-resolved chromedriver path from resolve_driver_once().
-                          Pass this when running many concurrent sessions to avoid
-                          race conditions in webdriver-manager's download cache.
+            headless:         Run Chrome without a visible window.
+            proxy:            Proxy URL (e.g. 'http://user:pass@host:port').
+            chromium_path:    Path to the Chrome/Chromium binary (auto-detected if None).
+            driver_path:      Pre-resolved chromedriver path from resolve_driver_once().
+                              Pass this when running many concurrent sessions to avoid
+                              race conditions in webdriver-manager's download cache.
+            custom_referrers: List of your own referrer URLs.  When provided, ~80% of
+                              sessions will use one of these as the HTTP Referer header
+                              so traffic appears to come from your own sites.  The
+                              remaining ~20% use the built-in search/social referrers.
+                              Pass an empty list or None to use only built-in referrers.
         """
         self.headless = headless
         self.proxy = proxy
         self.chromium_path = chromium_path
         self._driver_path = driver_path  # pre-resolved, skips resolution per session
+        self._custom_referrers: list = [r for r in (custom_referrers or []) if r and r.strip()]
         self.driver = None
         self._tmp_dir: Optional[str] = None
         self._setup_driver()
@@ -831,23 +838,43 @@ class SeleniumDriver:
     # Navigation
     # ------------------------------------------------------------------
 
+    def _pick_referrer(self) -> str:
+        """
+        Pick a referrer URL for this session.
+
+        Priority / weighting:
+          - If custom referrers are configured:
+              80% → random custom referrer (user's own sites)
+              20% → random built-in search/social referrer
+          - If no custom referrers:
+              100% → random built-in referrer (includes ~20% direct/empty)
+
+        Returns a referrer URL string, or '' for a direct (no-referrer) visit.
+        """
+        if self._custom_referrers:
+            if random.random() < 0.80:
+                return random.choice(self._custom_referrers)
+            else:
+                return random.choice(_REFERRERS)
+        return random.choice(_REFERRERS)
+
     def get(self, url: str):
         """
         Navigate to *url* with a realistic referrer.
 
-        ~80% of sessions arrive via a search engine or social referrer;
-        ~20% arrive direct (no referrer).  This matches real-world traffic
-        distribution and avoids the 100%-direct-traffic bot signal.
+        When custom referrers are configured, ~80% of sessions will use one
+        of those as the HTTP Referer header so traffic appears to come from
+        your own sites.  The remaining ~20% use built-in search/social
+        referrers.  When no custom referrers are set, the built-in pool is
+        used (which includes ~20% direct/no-referrer visits).
         """
         try:
             logger.debug(f"Navigating to: {url}")
 
-            referrer = random.choice(_REFERRERS)
+            referrer = self._pick_referrer()
             if referrer:
-                # Navigate to the referrer page first (blank page is fine —
-                # the browser just needs to set document.referrer), then use
-                # CDP Page.navigate with the referrer header so the target
-                # site sees it in the HTTP Referer header too.
+                # Use CDP Page.navigate with the referrer header so the target
+                # site sees it in the HTTP Referer header.
                 try:
                     self.driver.execute_cdp_cmd(
                         "Page.navigate",

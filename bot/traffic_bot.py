@@ -196,6 +196,7 @@ class TrafficBot:
                 proxy=proxy,
                 chromium_path=self.config.chromium_path,
                 driver_path=pre_driver_path,
+                custom_referrers=self.config.referrers or [],
             )
             driver.get(target_url)
 

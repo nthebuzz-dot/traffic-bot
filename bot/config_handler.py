@@ -14,6 +14,7 @@ DEFAULTS = {
     'headless': True,
     'chromium_path': None,
     'cookie_dir': None,         # directory for persistent cookie storage (None = default)
+    'referrers': [],            # custom referrer URLs; used for ~80% of sessions
 }
 
 
@@ -152,6 +153,14 @@ class ConfigHandler:
     @cookie_dir.setter
     def cookie_dir(self, value):
         self.config['cookie_dir'] = value if value else None
+
+    @property
+    def referrers(self):
+        return self.config.get('referrers') or []
+
+    @referrers.setter
+    def referrers(self, value):
+        self.config['referrers'] = list(value) if value else []
 
     # ------------------------------------------------------------------
     # Dict-style access (kept for backwards compatibility)

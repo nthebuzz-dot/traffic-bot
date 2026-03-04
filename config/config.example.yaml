@@ -24,6 +24,15 @@ proxies: []
 #   - "http://user:password@proxy1.example:8000"
 #   - "http://user:password@proxy2.example:8000"
 
+# Custom referrer URLs — traffic will appear to come from these sites (~80% of sessions).
+# Add your own websites, blogs, forums, newsletters, etc.
+# Leave empty to use only built-in search/social referrers (Google, Bing, etc.).
+referrers: []
+# referrers:
+#   - "https://yourblog.com"
+#   - "https://yourforum.com/thread/123"
+#   - "https://yournewsletter.com/issue/42"
+
 # Run browser without a visible window (required on servers)
 headless: true
 

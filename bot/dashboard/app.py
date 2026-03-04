@@ -45,6 +45,7 @@ _DEFAULT_CONFIG: dict = {
     "session_duration": 45,
     "duration_seconds": 600,
     "proxies": [],
+    "referrers": [],            # custom referrer URLs (user's own sites)
     "headless": True,
     "chromium_path": "",
     "cookie_dir": "",           # directory for persistent cookie storage
@@ -158,11 +159,13 @@ def index():
     urls_str = "\n".join(urls)
 
     proxies_str = "\n".join(_current_config.get("proxies") or [])
+    referrers_str = "\n".join(_current_config.get("referrers") or [])
     return render_template(
         "index.html",
         config=_current_config,
         urls_str=urls_str,
         proxies_str=proxies_str,
+        referrers_str=referrers_str,
     )
 
 
@@ -204,6 +207,11 @@ def save_config():
     if isinstance(raw_proxies, str):
         raw_proxies = [p.strip() for p in raw_proxies.replace(",", "\n").splitlines()]
     _current_config["proxies"] = [p for p in raw_proxies if p]
+
+    raw_referrers = data.get("referrers", [])
+    if isinstance(raw_referrers, str):
+        raw_referrers = [r.strip() for r in raw_referrers.replace(",", "\n").splitlines()]
+    _current_config["referrers"] = [r for r in raw_referrers if r]
 
     # Persist to disk so config survives page refreshes and server restarts
     _save_persisted_config(_current_config)
