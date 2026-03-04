@@ -1,6 +1,8 @@
+import itertools
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from typing import Dict
 
 from bot.logger import setup_logger
 from bot.proxy_manager import ProxyManager
@@ -34,28 +36,47 @@ class TrafficBot:
     windows run simultaneously. As each one finishes, a new one starts
     immediately so the concurrency level is always maintained until all
     `sessions_count` sessions have been dispatched.
+
+    When multiple URLs are configured, sessions are distributed across
+    them in round-robin order and per-URL performance stats are tracked.
     """
 
     def __init__(self, config):
         self.config = config
         self.proxy_manager = ProxyManager(config.proxies)
+
+        # Global counters
         self.sessions_completed = 0
         self.sessions_failed = 0
+
+        # Per-URL counters  {url: {"completed": int, "failed": int}}
+        self._url_stats: Dict[str, Dict[str, int]] = {}
+        for url in config.effective_urls:
+            self._url_stats[url] = {"completed": 0, "failed": 0}
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    @property
+    def url_stats(self) -> Dict[str, Dict[str, int]]:
+        """Return a snapshot of per-URL stats (thread-safe copy)."""
+        with _counter_lock:
+            return {url: dict(counts) for url, counts in self._url_stats.items()}
 
     def run(self):
         global _STOP_REQUESTED
         _STOP_REQUESTED = False  # reset on each run
 
         concurrency = max(1, self.config.concurrent_sessions)
+        urls = self.config.effective_urls
 
         logger.info("=" * 60)
         logger.info("WEB TRAFFIC BOT STARTED")
         logger.info("=" * 60)
-        logger.info(f"Target URL          : {self.config.target_url}")
+        logger.info(f"Target URLs         : {len(urls)}")
+        for i, u in enumerate(urls, 1):
+            logger.info(f"  [{i}] {u}")
         logger.info(f"Total Sessions      : {self.config.sessions_count}")
         logger.info(f"Concurrent Sessions : {concurrency}")
         logger.info(f"Session Duration    : {self.config.session_duration}s")
@@ -72,6 +93,9 @@ class TrafficBot:
             logger.info(f"ChromeDriver pre-resolved: {pre_driver_path}")
 
         start_time = time.time()
+
+        # Round-robin URL iterator
+        url_cycle = itertools.cycle(urls)
 
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
             futures = {}
@@ -94,10 +118,11 @@ class TrafficBot:
                        and session_num < self.config.sessions_count
                        and not _STOP_REQUESTED):
                     session_num += 1
-                    future = pool.submit(self._run_session, session_num, pre_driver_path)
-                    futures[future] = session_num
+                    target_url = next(url_cycle)
+                    future = pool.submit(self._run_session, session_num, target_url, pre_driver_path)
+                    futures[future] = (session_num, target_url)
                     logger.info(f"[Session {session_num}/{self.config.sessions_count}] started "
-                                f"(active: {len(futures)})")
+                                f"→ {target_url} (active: {len(futures)})")
 
                 # Wait for at least one to finish before submitting more
                 if futures:
@@ -113,29 +138,33 @@ class TrafficBot:
                         continue
 
                     for f in done_futures:
-                        snum = futures.pop(f)
+                        snum, url = futures.pop(f)
                         try:
                             f.result()  # re-raise any exception
                             with _counter_lock:
                                 self.sessions_completed += 1
-                            logger.info(f"[Session {snum}] completed ✓")
+                                self._url_stats[url]["completed"] += 1
+                            logger.info(f"[Session {snum}] completed ✓  ({url})")
                         except Exception as e:
                             with _counter_lock:
                                 self.sessions_failed += 1
-                            logger.error(f"[Session {snum}] failed: {e}")
+                                self._url_stats[url]["failed"] += 1
+                            logger.error(f"[Session {snum}] failed: {e}  ({url})")
 
             # Wait for all remaining in-flight sessions to finish
             logger.info("Waiting for in-flight sessions to finish...")
-            for f, snum in list(futures.items()):
+            for f, (snum, url) in list(futures.items()):
                 try:
                     f.result()
                     with _counter_lock:
                         self.sessions_completed += 1
-                    logger.info(f"[Session {snum}] completed ✓")
+                        self._url_stats[url]["completed"] += 1
+                    logger.info(f"[Session {snum}] completed ✓  ({url})")
                 except Exception as e:
                     with _counter_lock:
                         self.sessions_failed += 1
-                    logger.error(f"[Session {snum}] failed: {e}")
+                        self._url_stats[url]["failed"] += 1
+                    logger.error(f"[Session {snum}] failed: {e}  ({url})")
 
         self._print_summary(time.time() - start_time)
 
@@ -143,7 +172,7 @@ class TrafficBot:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _run_session(self, session_num: int, pre_driver_path=None):
+    def _run_session(self, session_num: int, target_url: str, pre_driver_path=None):
         """Run a single browser session. Called from a thread pool worker."""
         driver = None
         try:
@@ -157,7 +186,7 @@ class TrafficBot:
                 chromium_path=self.config.chromium_path,
                 driver_path=pre_driver_path,
             )
-            driver.get(self.config.target_url)
+            driver.get(target_url)
 
             simulator = SessionSimulator(driver.driver, self.config.session_duration)
             simulator.simulate_engagement()
@@ -176,4 +205,19 @@ class TrafficBot:
         logger.info(f"Total Duration     : {duration:.2f}s ({duration / 60:.2f}m)")
         if total > 0:
             logger.info(f"Success Rate       : {self.sessions_completed / total * 100:.1f}%")
+
+        # Per-URL breakdown
+        if len(self._url_stats) > 1:
+            logger.info("-" * 60)
+            logger.info("PER-URL BREAKDOWN")
+            logger.info("-" * 60)
+            for url, counts in self._url_stats.items():
+                url_total = counts["completed"] + counts["failed"]
+                rate = (counts["completed"] / url_total * 100) if url_total > 0 else 0
+                logger.info(
+                    f"  {url}\n"
+                    f"    Completed: {counts['completed']}  Failed: {counts['failed']}  "
+                    f"Success: {rate:.1f}%"
+                )
+
         logger.info("=" * 60)

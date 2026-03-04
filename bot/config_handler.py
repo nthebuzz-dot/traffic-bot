@@ -4,6 +4,8 @@ import os
 import yaml
 
 DEFAULTS = {
+    'target_url': '',
+    'target_urls': [],          # NEW: list of URLs; takes priority over target_url
     'sessions_count': 10,
     'concurrent_sessions': 1,
     'session_duration': 45,
@@ -36,10 +38,30 @@ class ConfigHandler:
 
     def validate(self):
         """Raise ValueError if the config is not usable."""
-        if not self.config.get('target_url'):
+        if not self.effective_urls:
             raise ValueError(
-                "target_url is required. Pass --url on the command line or set it in the config file."
+                "At least one URL is required. Pass --url on the command line "
+                "or set target_url / target_urls in the config file."
             )
+
+    # ------------------------------------------------------------------
+    # Computed helpers
+    # ------------------------------------------------------------------
+
+    @property
+    def effective_urls(self) -> list:
+        """
+        Return the canonical list of target URLs.
+
+        Priority:
+          1. target_urls list (if non-empty)
+          2. target_url single string (backwards-compat)
+        """
+        urls = [u.strip() for u in (self.config.get('target_urls') or []) if u and u.strip()]
+        if urls:
+            return urls
+        single = (self.config.get('target_url') or '').strip()
+        return [single] if single else []
 
     # ------------------------------------------------------------------
     # Attribute-style access (used by TrafficBot and CLI)
@@ -47,11 +69,21 @@ class ConfigHandler:
 
     @property
     def target_url(self):
-        return self.config.get('target_url')
+        """Return the first URL for backwards compatibility."""
+        urls = self.effective_urls
+        return urls[0] if urls else ''
 
     @target_url.setter
     def target_url(self, value):
         self.config['target_url'] = value
+
+    @property
+    def target_urls(self):
+        return self.config.get('target_urls') or []
+
+    @target_urls.setter
+    def target_urls(self, value):
+        self.config['target_urls'] = list(value) if value else []
 
     @property
     def sessions_count(self):

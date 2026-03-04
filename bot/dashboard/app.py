@@ -39,6 +39,7 @@ _CONFIG_FILE = os.path.join(os.path.dirname(__file__), "config_state.json")
 
 _DEFAULT_CONFIG: dict = {
     "target_url": "",
+    "target_urls": [],          # NEW: list of URLs
     "sessions_count": 10,
     "concurrent_sessions": 1,
     "session_duration": 45,
@@ -148,8 +149,20 @@ _attach_broadcast_handler()
 
 @app.route("/")
 def index():
+    # Build a newline-separated string of all URLs for the textarea
+    urls = _current_config.get("target_urls") or []
+    # Backwards-compat: if only the old single target_url is set, show it
+    if not urls and _current_config.get("target_url"):
+        urls = [_current_config["target_url"]]
+    urls_str = "\n".join(urls)
+
     proxies_str = "\n".join(_current_config.get("proxies") or [])
-    return render_template("index.html", config=_current_config, proxies_str=proxies_str)
+    return render_template(
+        "index.html",
+        config=_current_config,
+        urls_str=urls_str,
+        proxies_str=proxies_str,
+    )
 
 
 @app.route("/api/config", methods=["GET"])
@@ -161,7 +174,23 @@ def get_config():
 def save_config():
     data = request.get_json(force=True)
 
-    _current_config["target_url"] = str(data.get("target_url", "")).strip()
+    # ------------------------------------------------------------------
+    # Multi-URL: accept either a list or a newline/comma-separated string
+    # ------------------------------------------------------------------
+    raw_urls = data.get("target_urls", [])
+    if isinstance(raw_urls, str):
+        raw_urls = [u.strip() for u in raw_urls.replace(",", "\n").splitlines()]
+    target_urls = [u for u in raw_urls if u]
+
+    # Backwards-compat: also accept the old single target_url field
+    single_url = str(data.get("target_url", "")).strip()
+    if not target_urls and single_url:
+        target_urls = [single_url]
+
+    _current_config["target_urls"] = target_urls
+    # Keep target_url in sync with the first entry for CLI / old code
+    _current_config["target_url"] = target_urls[0] if target_urls else ""
+
     _current_config["sessions_count"] = int(data.get("sessions_count", 10))
     _current_config["concurrent_sessions"] = max(1, int(data.get("concurrent_sessions", 1)))
     _current_config["session_duration"] = int(data.get("session_duration", 45))
@@ -188,14 +217,15 @@ def bot_status():
 
 @app.route("/api/stats", methods=["GET"])
 def bot_stats():
-    """Return live session counters from the running bot."""
+    """Return live session counters from the running bot (global + per-URL)."""
     if _bot_instance is not None:
         return jsonify({
-            "completed": _bot_instance.sessions_completed,
-            "failed":    _bot_instance.sessions_failed,
-            "total":     _bot_instance.config.sessions_count,
+            "completed":  _bot_instance.sessions_completed,
+            "failed":     _bot_instance.sessions_failed,
+            "total":      _bot_instance.config.sessions_count,
+            "url_stats":  _bot_instance.url_stats,
         })
-    return jsonify({"completed": 0, "failed": 0, "total": 0})
+    return jsonify({"completed": 0, "failed": 0, "total": 0, "url_stats": {}})
 
 
 @app.route("/api/start", methods=["POST"])
@@ -206,8 +236,10 @@ def start_bot():
         if _bot_thread is not None and _bot_thread.is_alive():
             return jsonify({"status": "error", "message": "Bot is already running"}), 409
 
-        if not _current_config.get("target_url"):
-            return jsonify({"status": "error", "message": "target_url is required"}), 400
+        # Validate: at least one URL must be configured
+        urls = _current_config.get("target_urls") or []
+        if not urls and not _current_config.get("target_url"):
+            return jsonify({"status": "error", "message": "At least one target URL is required"}), 400
 
         config = ConfigHandler()
         config.config.update(_current_config)
