@@ -2,8 +2,9 @@ import itertools
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Dict
+from typing import Dict, Optional
 
+from bot.cookie_manager import CookieManager
 from bot.logger import setup_logger
 from bot.proxy_manager import ProxyManager
 from bot.selenium_driver import SeleniumDriver, resolve_driver_once
@@ -172,9 +173,11 @@ class TrafficBot:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _run_session(self, session_num: int, target_url: str, pre_driver_path=None):
+    def _run_session(self, session_num: int, target_url: str,
+                     pre_driver_path: Optional[str] = None):
         """Run a single browser session. Called from a thread pool worker."""
         driver = None
+        cookie_mgr = None
         try:
             proxy = self.proxy_manager.get_next_proxy()
             if proxy:
@@ -188,8 +191,18 @@ class TrafficBot:
             )
             driver.get(target_url)
 
+            # Inject saved + consent cookies so the session looks like a
+            # returning visitor (suppresses consent banners, passes cookie
+            # checks used by bot-detection systems).
+            cookie_dir = self.config.get("cookie_dir") or None
+            cookie_mgr = CookieManager(driver.driver, target_url, cookie_dir=cookie_dir)
+            cookie_mgr.inject()
+
             simulator = SessionSimulator(driver.driver, self.config.session_duration)
             simulator.simulate_engagement()
+
+            # Persist cookies for the next session on this domain
+            cookie_mgr.save()
 
         finally:
             if driver:

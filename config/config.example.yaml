@@ -29,3 +29,8 @@ headless: true
 
 # Leave blank to auto-detect Chrome/Chromium
 chromium_path: ""
+
+# Directory where per-domain cookies are stored between sessions.
+# Cookies make the bot look like a returning visitor and suppress consent banners.
+# Leave blank to use the default: ~/.web-traffic-bot/cookies/
+cookie_dir: ""

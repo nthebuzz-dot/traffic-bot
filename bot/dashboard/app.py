@@ -39,7 +39,7 @@ _CONFIG_FILE = os.path.join(os.path.dirname(__file__), "config_state.json")
 
 _DEFAULT_CONFIG: dict = {
     "target_url": "",
-    "target_urls": [],          # NEW: list of URLs
+    "target_urls": [],          # list of URLs
     "sessions_count": 10,
     "concurrent_sessions": 1,
     "session_duration": 45,
@@ -47,6 +47,7 @@ _DEFAULT_CONFIG: dict = {
     "proxies": [],
     "headless": True,
     "chromium_path": "",
+    "cookie_dir": "",           # directory for persistent cookie storage
 }
 
 
@@ -197,6 +198,7 @@ def save_config():
     _current_config["duration_seconds"] = int(data.get("duration_seconds", 600))
     _current_config["headless"] = bool(data.get("headless", True))
     _current_config["chromium_path"] = str(data.get("chromium_path", "")).strip()
+    _current_config["cookie_dir"] = str(data.get("cookie_dir", "")).strip()
 
     raw_proxies = data.get("proxies", [])
     if isinstance(raw_proxies, str):

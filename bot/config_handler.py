@@ -5,7 +5,7 @@ import yaml
 
 DEFAULTS = {
     'target_url': '',
-    'target_urls': [],          # NEW: list of URLs; takes priority over target_url
+    'target_urls': [],          # list of URLs; takes priority over target_url
     'sessions_count': 10,
     'concurrent_sessions': 1,
     'session_duration': 45,
@@ -13,6 +13,7 @@ DEFAULTS = {
     'proxies': [],
     'headless': True,
     'chromium_path': None,
+    'cookie_dir': None,         # directory for persistent cookie storage (None = default)
 }
 
 
@@ -142,6 +143,15 @@ class ConfigHandler:
     @chromium_path.setter
     def chromium_path(self, value):
         self.config['chromium_path'] = value
+
+    @property
+    def cookie_dir(self):
+        path = self.config.get('cookie_dir')
+        return path if path else None
+
+    @cookie_dir.setter
+    def cookie_dir(self, value):
+        self.config['cookie_dir'] = value if value else None
 
     # ------------------------------------------------------------------
     # Dict-style access (kept for backwards compatibility)
