@@ -73,6 +73,12 @@ class TrafficBot:
         concurrency = max(1, self.config.concurrent_sessions)
         urls = self.config.effective_urls
 
+        if not urls:
+            raise ValueError(
+                "No target URLs configured. "
+                "Set target_url or target_urls in the config or dashboard."
+            )
+
         logger.info("=" * 60)
         logger.info("WEB TRAFFIC BOT STARTED")
         logger.info("=" * 60)
@@ -84,6 +90,7 @@ class TrafficBot:
         logger.info(f"Session Duration    : {self.config.session_duration}s")
         logger.info(f"Total Duration      : {self.config.duration_seconds}s")
         logger.info(f"Proxies             : {len(self.config.proxies)}")
+        logger.info(f"Referrers           : {len(self.config.referrers)} custom")
         logger.info(f"Headless            : {self.config.headless}")
         logger.info("=" * 60)
 
@@ -203,8 +210,10 @@ class TrafficBot:
             # Inject saved + consent cookies so the session looks like a
             # returning visitor (suppresses consent banners, passes cookie
             # checks used by bot-detection systems).
-            cookie_dir = self.config.get("cookie_dir") or None
-            cookie_mgr = CookieManager(driver.driver, target_url, cookie_dir=cookie_dir)
+            cookie_mgr = CookieManager(
+                driver.driver, target_url,
+                cookie_dir=self.config.cookie_dir or None,
+            )
             cookie_mgr.inject()
 
             simulator = SessionSimulator(driver.driver, self.config.session_duration)
