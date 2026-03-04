@@ -92,13 +92,18 @@ class TrafficBot:
         logger.info("=" * 60)
         logger.info(f"Target URLs         : {len(urls)}")
         for i, u in enumerate(urls, 1):
-            logger.info(f"  [{i}] {u}")
+            per_refs = self._url_referrers.get(u, [])
+            if per_refs:
+                logger.info(f"  [{i}] {u}  → {len(per_refs)} referrer(s)")
+            else:
+                logger.info(f"  [{i}] {u}")
         logger.info(f"Total Sessions      : {self.config.sessions_count}")
         logger.info(f"Concurrent Sessions : {concurrency}")
         logger.info(f"Session Duration    : {self.config.session_duration}s")
         logger.info(f"Total Duration      : {self.config.duration_seconds}s")
         logger.info(f"Proxies             : {len(self.config.proxies)}")
-        logger.info(f"Referrers           : {len(self.config.referrers)} custom")
+        global_refs = len(self.config.referrers)
+        logger.info(f"Referrers           : {global_refs} global custom")
         logger.info(f"Headless            : {self.config.headless}")
         logger.info("=" * 60)
 

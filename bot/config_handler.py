@@ -109,12 +109,13 @@ class ConfigHandler:
             url, refs = _parse_url_line(entry)
             if url:
                 result[url] = refs
-        # Also handle the legacy single target_url
-        single = (self.config.get('target_url') or '').strip()
-        if single and single not in result:
-            url, refs = _parse_url_line(single)
-            if url:
-                result[url] = refs
+        # Also handle the legacy single target_url (backwards-compat)
+        single_raw = (self.config.get('target_url') or '').strip()
+        if single_raw:
+            single_url, single_refs = _parse_url_line(single_raw)
+            # Only add if not already covered by target_urls
+            if single_url and single_url not in result:
+                result[single_url] = single_refs
         return result
 
     # ------------------------------------------------------------------
