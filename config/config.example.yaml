@@ -1,0 +1,31 @@
+# Example configuration for Web Traffic Bot
+# Copy to config.yaml and edit as needed for your target site
+
+target_url: "https://example.com"
+
+# Total number of browser sessions to run
+sessions_count: 10
+
+# How many browser windows to run at the same time.
+# Set to 1 for sequential (safe on low-memory servers).
+# Set to 3-5 for faster traffic generation.
+# Warning: each concurrent session uses ~200-400 MB RAM.
+concurrent_sessions: 1
+
+# How long each session stays on the page (seconds)
+session_duration: 45
+
+# Hard stop: bot stops after this many seconds regardless of sessions_count
+duration_seconds: 600
+
+# Optional proxy list (leave empty to run without proxies)
+proxies: []
+# proxies:
+#   - "http://user:password@proxy1.example:8000"
+#   - "http://user:password@proxy2.example:8000"
+
+# Run browser without a visible window (required on servers)
+headless: true
+
+# Leave blank to auto-detect Chrome/Chromium
+chromium_path: ""

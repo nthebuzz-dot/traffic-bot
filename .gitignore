@@ -1,0 +1,23 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+# Dashboard persisted config (user-specific, not committed)
+bot/dashboard/config_state.json
+*.py[cod]
+*$py.class
+bot.egg-info/
+dist/
+build/
+venv/
+env/
+*.sqlite3
+*.log
+.cache/
+coverage/
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# OS generated
+Thumbs.db
+ehthumbs.db

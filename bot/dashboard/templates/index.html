@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Web Traffic Bot — Dashboard</title>
+  <style>
+    /* ------------------------------------------------------------------ */
+    /* Reset & base                                                         */
+    /* ------------------------------------------------------------------ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0f1117;
+      --surface:  #1a1d27;
+      --border:   #2a2d3e;
+      --accent:   #4f8ef7;
+      --accent2:  #7c3aed;
+      --green:    #22c55e;
+      --red:      #ef4444;
+      --yellow:   #f59e0b;
+      --text:     #e2e8f0;
+      --muted:    #64748b;
+      --radius:   10px;
+      --font:     'Segoe UI', system-ui, sans-serif;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Header                                                               */
+    /* ------------------------------------------------------------------ */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 1rem 2rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    header .logo {
+      font-size: 1.4rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    header .subtitle { color: var(--muted); font-size: .85rem; }
+
+    #status-badge {
+      margin-left: auto;
+      padding: .35rem .9rem;
+      border-radius: 999px;
+      font-size: .8rem;
+      font-weight: 600;
+      letter-spacing: .04em;
+      background: var(--border);
+      color: var(--muted);
+      transition: background .3s, color .3s;
+    }
+    #status-badge.running  { background: #14532d; color: var(--green); }
+    #status-badge.stopped  { background: #1c1917; color: var(--muted); }
+
+    /* ------------------------------------------------------------------ */
+    /* Layout                                                               */
+    /* ------------------------------------------------------------------ */
+    main {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 380px 1fr;
+      gap: 1.5rem;
+      padding: 1.5rem 2rem;
+      max-width: 1400px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    @media (max-width: 900px) {
+      main { grid-template-columns: 1fr; }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Card                                                                 */
+    /* ------------------------------------------------------------------ */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+    }
+    .card h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 1.2rem;
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+    }
+    .card h2 .icon { font-size: 1.1rem; }
+
+    /* ------------------------------------------------------------------ */
+    /* Form                                                                 */
+    /* ------------------------------------------------------------------ */
+    .form-group { margin-bottom: 1rem; }
+    label {
+      display: block;
+      font-size: .8rem;
+      font-weight: 500;
+      color: var(--muted);
+      margin-bottom: .35rem;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+    input[type="text"],
+    input[type="number"],
+    input[type="url"],
+    textarea,
+    select {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: .9rem;
+      padding: .55rem .75rem;
+      outline: none;
+      transition: border-color .2s;
+    }
+    input:focus, textarea:focus, select:focus {
+      border-color: var(--accent);
+    }
+    textarea { resize: vertical; min-height: 90px; font-size: .82rem; }
+
+    .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+
+    /* Toggle switch */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+    }
+    .toggle-label { font-size: .9rem; color: var(--text); }
+    .toggle-sub   { font-size: .75rem; color: var(--muted); }
+    .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; inset: 0;
+      background: var(--border);
+      border-radius: 999px;
+      cursor: pointer;
+      transition: background .2s;
+    }
+    .slider::before {
+      content: '';
+      position: absolute;
+      width: 18px; height: 18px;
+      left: 3px; top: 3px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform .2s;
+    }
+    input:checked + .slider { background: var(--accent); }
+    input:checked + .slider::before { transform: translateX(20px); }
+
+    /* ------------------------------------------------------------------ */
+    /* Buttons                                                              */
+    /* ------------------------------------------------------------------ */
+    .btn-row { display: flex; gap: .75rem; margin-top: 1.2rem; }
+    button {
+      flex: 1;
+      padding: .65rem 1rem;
+      border: none;
+      border-radius: 7px;
+      font-size: .9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity .15s, transform .1s;
+    }
+    button:active { transform: scale(.97); }
+    button:disabled { opacity: .4; cursor: not-allowed; }
+
+    #btn-start {
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff;
+    }
+    #btn-stop {
+      background: var(--red);
+      color: #fff;
+    }
+    #btn-save {
+      background: var(--border);
+      color: var(--text);
+      flex: 0 0 auto;
+      padding: .65rem 1.2rem;
+    }
+    #btn-save:hover { background: #3a3d52; }
+
+    /* ------------------------------------------------------------------ */
+    /* Stats row                                                            */
+    /* ------------------------------------------------------------------ */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: .75rem;
+      margin-bottom: 1.5rem;
+    }
+    .stat-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+      text-align: center;
+    }
+    .stat-card .val {
+      font-size: 1.8rem;
+      font-weight: 700;
+      color: var(--accent);
+    }
+    .stat-card .lbl { font-size: .75rem; color: var(--muted); margin-top: .2rem; }
+
+    /* ------------------------------------------------------------------ */
+    /* Log console                                                          */
+    /* ------------------------------------------------------------------ */
+    #log-box {
+      background: #0a0c12;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+      height: 420px;
+      overflow-y: auto;
+      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+      font-size: .78rem;
+      line-height: 1.6;
+      color: #a0aec0;
+    }
+    #log-box .line { white-space: pre-wrap; word-break: break-all; }
+    #log-box .line.info    { color: #90cdf4; }
+    #log-box .line.warning { color: var(--yellow); }
+    #log-box .line.error   { color: var(--red); }
+    #log-box .line.debug   { color: #4a5568; }
+
+    .log-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: .75rem;
+    }
+    #btn-clear-log {
+      flex: 0 0 auto;
+      background: var(--border);
+      color: var(--muted);
+      font-size: .75rem;
+      padding: .3rem .7rem;
+      border-radius: 5px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Toast                                                                */
+    /* ------------------------------------------------------------------ */
+    #toast {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: .75rem 1.2rem;
+      font-size: .85rem;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity .3s, transform .3s;
+      pointer-events: none;
+      z-index: 999;
+    }
+    #toast.show { opacity: 1; transform: translateY(0); }
+    #toast.ok  { border-color: var(--green); color: var(--green); }
+    #toast.err { border-color: var(--red);   color: var(--red);   }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="logo">⚡ Web Traffic Bot</div>
+    <div class="subtitle">Personal website load testing &amp; traffic simulation</div>
+  </div>
+  <span id="status-badge" class="stopped">● STOPPED</span>
+</header>
+
+<main>
+  <!-- ------------------------------------------------------------------ -->
+  <!-- Left panel: configuration form                                       -->
+  <!-- ------------------------------------------------------------------ -->
+  <aside>
+    <div class="card">
+      <h2><span class="icon">⚙️</span> Configuration</h2>
+
+      <div class="form-group">
+        <label>Target URL</label>
+        <input type="url" id="target_url" placeholder="https://yoursite.com"
+               value="{{ config.target_url }}" />
+      </div>
+
+      <div class="row-2">
+        <div class="form-group">
+          <label>Total Sessions</label>
+          <input type="number" id="sessions_count" min="1" max="9999"
+                 value="{{ config.sessions_count }}" />
+        </div>
+        <div class="form-group">
+          <label>Concurrent Sessions</label>
+          <input type="number" id="concurrent_sessions" min="1"
+                 value="{{ config.concurrent_sessions }}" />
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Session Duration (s)</label>
+        <input type="number" id="session_duration" min="5" max="3600"
+               value="{{ config.session_duration }}" />
+      </div>
+
+      <div class="form-group">
+        <label>Total Duration (s)</label>
+        <input type="number" id="duration_seconds" min="10"
+               value="{{ config.duration_seconds }}" />
+      </div>
+
+      <div class="form-group">
+        <label>Proxies <span style="color:var(--muted);font-size:.75rem;">(one per line, optional)</span></label>
+        <textarea id="proxies" placeholder="http://user:pass@host:port&#10;http://user:pass@host2:port">{{ proxies_str }}</textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Chromium Path <span style="color:var(--muted);font-size:.75rem;">(leave blank to auto-detect)</span></label>
+        <input type="text" id="chromium_path" placeholder="/usr/bin/chromium-browser"
+               value="{{ config.chromium_path or '' }}" />
+      </div>
+
+      <div class="toggle-row">
+        <div>
+          <div class="toggle-label">Headless mode</div>
+          <div class="toggle-sub">Run browser without a visible window</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="headless" {% if config.headless %}checked{% endif %} />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="btn-row">
+        <button id="btn-start" onclick="startBot()">▶ Start Bot</button>
+        <button id="btn-stop"  onclick="stopBot()" disabled>■ Stop</button>
+        <button id="btn-save"  onclick="saveConfig()">💾 Save</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ------------------------------------------------------------------ -->
+  <!-- Right panel: stats + live log                                        -->
+  <!-- ------------------------------------------------------------------ -->
+  <section>
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="val" id="stat-completed">—</div>
+        <div class="lbl">✅ Completed</div>
+      </div>
+      <div class="stat-card">
+        <div class="val" id="stat-failed" style="color:var(--red)">—</div>
+        <div class="lbl">❌ Failed</div>
+      </div>
+      <div class="stat-card">
+        <div class="val" id="stat-progress" style="color:var(--accent)">—</div>
+        <div class="lbl">Progress</div>
+      </div>
+      <div class="stat-card">
+        <div class="val" id="stat-elapsed" style="color:var(--yellow)">—</div>
+        <div class="lbl">⏱ Elapsed</div>
+      </div>
+    </div>
+
+    <div class="card" style="padding-bottom:1rem;">
+      <div class="log-header">
+        <h2 style="margin:0"><span class="icon">📋</span> Live Log</h2>
+        <button id="btn-clear-log" onclick="clearLog()">Clear</button>
+      </div>
+      <div id="log-box"></div>
+    </div>
+  </section>
+</main>
+
+<div id="toast"></div>
+
+<script>
+/* ------------------------------------------------------------------ */
+/* Helpers                                                              */
+/* ------------------------------------------------------------------ */
+const $ = id => document.getElementById(id);
+
+function toast(msg, type = 'ok') {
+  const el = $('toast');
+  el.textContent = msg;
+  el.className = `show ${type}`;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.className = '', 2800);
+}
+
+function clearLog() {
+  $('log-box').innerHTML = '';
+}
+
+function appendLog(line) {
+  const box = $('log-box');
+  const div = document.createElement('div');
+  div.className = 'line';
+  const lower = line.toLowerCase();
+  if (lower.includes('[error]') || lower.includes('error'))   div.classList.add('error');
+  else if (lower.includes('[warning]') || lower.includes('warn')) div.classList.add('warning');
+  else if (lower.includes('[debug]'))  div.classList.add('debug');
+  else                                 div.classList.add('info');
+  div.textContent = line;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+}
+
+/* ------------------------------------------------------------------ */
+/* Config                                                               */
+/* ------------------------------------------------------------------ */
+function getFormConfig() {
+  return {
+    target_url:          $('target_url').value.trim(),
+    sessions_count:      parseInt($('sessions_count').value) || 10,
+    concurrent_sessions: parseInt($('concurrent_sessions').value) || 1,
+    session_duration:    parseInt($('session_duration').value) || 45,
+    duration_seconds:    parseInt($('duration_seconds').value) || 600,
+    proxies:             $('proxies').value.trim(),
+    headless:            $('headless').checked,
+    chromium_path:       $('chromium_path').value.trim(),
+  };
+}
+
+async function saveConfig() {
+  const cfg = getFormConfig();
+  const r = await fetch('/api/config', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(cfg),
+  });
+  if (r.ok) toast('Configuration saved ✓');
+  else      toast('Failed to save config', 'err');
+}
+
+/* ------------------------------------------------------------------ */
+/* Bot control                                                          */
+/* ------------------------------------------------------------------ */
+async function startBot() {
+  await saveConfig();
+  const r = await fetch('/api/start', { method: 'POST' });
+  const data = await r.json();
+  if (r.ok) {
+    toast('Bot started ▶');
+    updateStatus(true);
+    startElapsedTimer();
+  } else {
+    toast(data.message || 'Failed to start', 'err');
+  }
+}
+
+async function stopBot() {
+  const r = await fetch('/api/stop', { method: 'POST' });
+  const data = await r.json();
+  toast(data.message || 'Stop signal sent');
+}
+
+/* ------------------------------------------------------------------ */
+/* Status polling                                                       */
+/* ------------------------------------------------------------------ */
+let _elapsedInterval = null;
+let _elapsedStart = null;
+
+function updateStatus(running) {
+  const badge = $('status-badge');
+  const btnStart = $('btn-start');
+  const btnStop  = $('btn-stop');
+  if (running) {
+    badge.textContent = '● RUNNING';
+    badge.className = 'running';
+    btnStart.disabled = true;
+    btnStop.disabled  = false;
+  } else {
+    badge.textContent = '● STOPPED';
+    badge.className = 'stopped';
+    btnStart.disabled = false;
+    btnStop.disabled  = true;
+    stopElapsedTimer();
+  }
+}
+
+function startElapsedTimer() {
+  _elapsedStart = Date.now();
+  $('stat-completed').textContent = '0';
+  $('stat-failed').textContent = '0';
+  $('stat-progress').textContent = '0 / ?';
+  clearInterval(_elapsedInterval);
+  _elapsedInterval = setInterval(() => {
+    const s = Math.floor((Date.now() - _elapsedStart) / 1000);
+    const m = Math.floor(s / 60);
+    $('stat-elapsed').textContent = m > 0 ? `${m}m ${s % 60}s` : `${s}s`;
+  }, 1000);
+}
+
+function stopElapsedTimer() {
+  clearInterval(_elapsedInterval);
+}
+
+async function pollStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const data = await r.json();
+    updateStatus(data.running);
+  } catch (_) {}
+}
+
+async function pollStats() {
+  try {
+    const r = await fetch('/api/stats');
+    const data = await r.json();
+    if (data.completed !== undefined) {
+      $('stat-completed').textContent = data.completed;
+    }
+    if (data.failed !== undefined) {
+      $('stat-failed').textContent = data.failed;
+    }
+    if (data.total !== undefined && data.total > 0) {
+      const done = data.completed + data.failed;
+      $('stat-progress').textContent = `${done} / ${data.total}`;
+    }
+  } catch (_) {}
+}
+
+// Poll every 3 seconds
+setInterval(() => { pollStatus(); pollStats(); }, 3000);
+pollStatus();
+pollStats();
+
+/* ------------------------------------------------------------------ */
+/* Live log via SSE                                                     */
+/* ------------------------------------------------------------------ */
+const evtSource = new EventSource('/api/logs');
+
+evtSource.onmessage = e => {
+  const line = e.data;
+  if (!line || line.startsWith(':')) return;  // keep-alive ping
+  appendLog(line);
+};
+
+evtSource.onerror = () => {
+  appendLog('[dashboard] Log stream disconnected — will reconnect automatically.');
+};
+</script>
+</body>
+</html>
