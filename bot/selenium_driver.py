@@ -79,6 +79,174 @@ _FALLBACK_TIMEZONES = [
     "Asia/Tokyo", "Asia/Singapore", "Australia/Sydney",
 ]
 
+# Device pixel ratios (common on real displays)
+_DEVICE_PIXEL_RATIOS = [1.0, 1.25, 1.5, 2.0, 2.25, 2.5]
+
+# Realistic referrers — organic search, social, direct
+# Used to make sessions look like they came from a real traffic source
+# rather than all arriving with no referrer (a strong bot signal at scale).
+_REFERRERS = [
+    # Google organic search (most common real-world referrer)
+    "https://www.google.com/",
+    "https://www.google.com/search?q=",
+    "https://www.google.co.uk/search?q=",
+    "https://www.google.com.au/search?q=",
+    "https://www.google.ca/search?q=",
+    "https://www.google.de/search?q=",
+    "https://www.google.fr/search?q=",
+    # Bing
+    "https://www.bing.com/search?q=",
+    # DuckDuckGo
+    "https://duckduckgo.com/?q=",
+    # Social
+    "https://www.facebook.com/",
+    "https://t.co/",
+    "https://www.reddit.com/",
+    "https://www.linkedin.com/",
+    # Direct (no referrer) — ~20% of real traffic
+    "",
+    "",
+    "",
+    "",
+]
+
+# ---------------------------------------------------------------------------
+# JavaScript stealth patches
+#
+# These are injected via CDP Page.addScriptToEvaluateOnNewDocument so they
+# run BEFORE any page script can read the fingerprint properties.
+#
+# Patches applied:
+#   1. navigator.webdriver → undefined  (primary Selenium detection flag)
+#   2. navigator.plugins   → realistic plugin list (empty = headless bot)
+#   3. navigator.mimeTypes → matching mime types for the fake plugins
+#   4. window.chrome       → realistic chrome runtime object
+#   5. navigator.permissions.query → spoof 'notifications' as 'default'
+#      (headless Chrome returns 'denied' which is a known bot signal)
+#   6. Canvas fingerprint noise — tiny per-session pixel perturbation
+#      so every session has a unique canvas hash
+#   7. WebGL renderer/vendor — spoof to a real GPU string
+#   8. navigator.hardwareConcurrency — random realistic value
+#   9. navigator.deviceMemory — random realistic value
+# ---------------------------------------------------------------------------
+
+_STEALTH_JS = """
+(function () {
+  'use strict';
+
+  /* 1. Remove navigator.webdriver */
+  Object.defineProperty(navigator, 'webdriver', {
+    get: () => undefined,
+    configurable: true,
+  });
+
+  /* 2 & 3. Realistic plugins + mimeTypes */
+  const _plugins = [
+    { name: 'Chrome PDF Plugin',        filename: 'internal-pdf-viewer',  description: 'Portable Document Format' },
+    { name: 'Chrome PDF Viewer',        filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+    { name: 'Native Client',            filename: 'internal-nacl-plugin',  description: '' },
+  ];
+  const pluginArray = Object.create(PluginArray.prototype);
+  _plugins.forEach((p, i) => {
+    const plugin = Object.create(Plugin.prototype);
+    Object.defineProperty(plugin, 'name',        { get: () => p.name });
+    Object.defineProperty(plugin, 'filename',    { get: () => p.filename });
+    Object.defineProperty(plugin, 'description', { get: () => p.description });
+    Object.defineProperty(plugin, 'length',      { get: () => 0 });
+    Object.defineProperty(pluginArray, i,         { get: () => plugin });
+  });
+  Object.defineProperty(pluginArray, 'length', { get: () => _plugins.length });
+  Object.defineProperty(navigator, 'plugins', { get: () => pluginArray });
+
+  /* 4. window.chrome runtime object */
+  if (!window.chrome) {
+    window.chrome = {
+      app: { isInstalled: false, InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' }, RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' } },
+      runtime: {
+        OnInstalledReason: { CHROME_UPDATE: 'chrome_update', INSTALL: 'install', SHARED_MODULE_UPDATE: 'shared_module_update', UPDATE: 'update' },
+        OnRestartRequiredReason: { APP_UPDATE: 'app_update', GC: 'gc', OS_UPDATE: 'os_update' },
+        PlatformArch: { ARM: 'arm', ARM64: 'arm64', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64' },
+        PlatformNaclArch: { ARM: 'arm', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64' },
+        PlatformOs: { ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win' },
+        RequestUpdateCheckStatus: { NO_UPDATE: 'no_update', THROTTLED: 'throttled', UPDATE_AVAILABLE: 'update_available' },
+      },
+    };
+  }
+
+  /* 5. Permissions — spoof 'notifications' query to return 'default' */
+  const _origQuery = window.Notification
+    ? Notification.requestPermission
+    : null;
+  if (navigator.permissions && navigator.permissions.query) {
+    const _origPermQuery = navigator.permissions.query.bind(navigator.permissions);
+    Object.defineProperty(navigator.permissions, 'query', {
+      value: (params) => {
+        if (params && params.name === 'notifications') {
+          return Promise.resolve({ state: 'default', onchange: null });
+        }
+        return _origPermQuery(params);
+      },
+    });
+  }
+
+  /* 6. Canvas fingerprint noise — unique per session */
+  const _noise = Math.random() * 0.0001;
+  const _origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+  HTMLCanvasElement.prototype.toDataURL = function (type) {
+    const ctx = this.getContext('2d');
+    if (ctx) {
+      const imageData = ctx.getImageData(0, 0, this.width || 1, this.height || 1);
+      imageData.data[0] = imageData.data[0] ^ Math.floor(_noise * 255);
+      ctx.putImageData(imageData, 0, 0);
+    }
+    return _origToDataURL.apply(this, arguments);
+  };
+  const _origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
+  CanvasRenderingContext2D.prototype.getImageData = function (x, y, w, h) {
+    const data = _origGetImageData.apply(this, arguments);
+    data.data[0] = data.data[0] ^ Math.floor(_noise * 255);
+    return data;
+  };
+
+  /* 7. WebGL renderer / vendor spoofing */
+  const _getParam = WebGLRenderingContext.prototype.getParameter;
+  const _gpuVendors = ['Intel Inc.', 'NVIDIA Corporation', 'AMD', 'Apple Inc.'];
+  const _gpuRenderers = [
+    'Intel Iris OpenGL Engine',
+    'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    'ANGLE (NVIDIA, NVIDIA GeForce GTX 1650 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    'ANGLE (AMD, AMD Radeon RX 580 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    'Apple M1',
+  ];
+  const _vendor   = _gpuVendors[Math.floor(Math.random() * _gpuVendors.length)];
+  const _renderer = _gpuRenderers[Math.floor(Math.random() * _gpuRenderers.length)];
+  WebGLRenderingContext.prototype.getParameter = function (param) {
+    if (param === 37445) return _vendor;    // UNMASKED_VENDOR_WEBGL
+    if (param === 37446) return _renderer;  // UNMASKED_RENDERER_WEBGL
+    return _getParam.apply(this, arguments);
+  };
+  if (typeof WebGL2RenderingContext !== 'undefined') {
+    const _getParam2 = WebGL2RenderingContext.prototype.getParameter;
+    WebGL2RenderingContext.prototype.getParameter = function (param) {
+      if (param === 37445) return _vendor;
+      if (param === 37446) return _renderer;
+      return _getParam2.apply(this, arguments);
+    };
+  }
+
+  /* 8. hardwareConcurrency — random 2/4/6/8/12/16 */
+  const _cores = [2, 4, 4, 6, 8, 8, 12, 16][Math.floor(Math.random() * 8)];
+  Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => _cores });
+
+  /* 9. deviceMemory — random 2/4/8 GB */
+  const _mem = [2, 4, 4, 8, 8][Math.floor(Math.random() * 5)];
+  try {
+    Object.defineProperty(navigator, 'deviceMemory', { get: () => _mem });
+  } catch (_) {}
+
+})();
+"""
+
 # ---------------------------------------------------------------------------
 # Proxy-aware timezone lookup
 # ---------------------------------------------------------------------------
@@ -513,7 +681,9 @@ class SeleniumDriver:
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
         options.add_argument("--disable-extensions")
-        options.add_argument("--disable-plugins")
+        # NOTE: do NOT add --disable-plugins — it makes the browser look like
+        # a bot by removing all plugins (real browsers always have at least
+        # the PDF viewer plugin).
         # Note: window size is set randomly in the fingerprint section below
 
         # Fix "DevToolsActivePort file doesn't exist" on servers:
@@ -552,10 +722,15 @@ class SeleniumDriver:
         options.add_argument(f"--user-agent={ua}")
         logger.debug(f"User-agent: {ua}")
 
-        # Random screen resolution (overrides the fixed 1920,1080 above)
+        # Random screen resolution
         screen = random.choice(_SCREEN_SIZES)
         w, h = screen.split(",")
         options.add_argument(f"--window-size={w},{h}")
+
+        # Random device pixel ratio (1x, 1.5x, 2x, etc.)
+        dpr = random.choice(_DEVICE_PIXEL_RATIOS)
+        options.add_argument(f"--force-device-scale-factor={dpr}")
+        logger.debug(f"Device pixel ratio: {dpr}")
 
         # Random Accept-Language
         lang = random.choice(_LANGUAGES)
@@ -585,6 +760,7 @@ class SeleniumDriver:
             try:
                 service = Service(self._driver_path)
                 self.driver = webdriver.Chrome(service=service, options=options)
+                self._inject_stealth_js()
                 logger.info("Selenium WebDriver initialised successfully (pre-resolved driver)")
                 return
             except Exception:
@@ -609,6 +785,7 @@ class SeleniumDriver:
                 service = self._get_webdriver_manager_service()
 
             self.driver = webdriver.Chrome(service=service, options=options)
+            self._inject_stealth_js()
             logger.info("Selenium WebDriver initialised successfully")
 
         except Exception as e:
@@ -627,6 +804,25 @@ class SeleniumDriver:
             )
             raise
 
+    def _inject_stealth_js(self) -> None:
+        """
+        Inject JavaScript fingerprint patches via CDP so they run before
+        any page script can read the fingerprint properties.
+
+        Uses Page.addScriptToEvaluateOnNewDocument which fires on every
+        navigation, including iframes — so the patches persist for the
+        entire session.
+        """
+        try:
+            self.driver.execute_cdp_cmd(
+                "Page.addScriptToEvaluateOnNewDocument",
+                {"source": _STEALTH_JS},
+            )
+            logger.debug("Stealth JS patches injected via CDP")
+        except Exception as e:
+            # CDP may not be available in all environments — log and continue
+            logger.debug(f"Stealth JS injection skipped: {e}")
+
     def _get_webdriver_manager_service(self) -> Service:
         """Download and return a Service using webdriver-manager."""
         return _get_wdm_service(self.chromium_path)
@@ -636,9 +832,34 @@ class SeleniumDriver:
     # ------------------------------------------------------------------
 
     def get(self, url: str):
+        """
+        Navigate to *url* with a realistic referrer.
+
+        ~80% of sessions arrive via a search engine or social referrer;
+        ~20% arrive direct (no referrer).  This matches real-world traffic
+        distribution and avoids the 100%-direct-traffic bot signal.
+        """
         try:
             logger.debug(f"Navigating to: {url}")
-            self.driver.get(url)
+
+            referrer = random.choice(_REFERRERS)
+            if referrer:
+                # Navigate to the referrer page first (blank page is fine —
+                # the browser just needs to set document.referrer), then use
+                # CDP Page.navigate with the referrer header so the target
+                # site sees it in the HTTP Referer header too.
+                try:
+                    self.driver.execute_cdp_cmd(
+                        "Page.navigate",
+                        {"url": url, "referrer": referrer},
+                    )
+                    logger.debug(f"Referrer: {referrer}")
+                except Exception:
+                    # CDP navigate failed — fall back to plain get()
+                    self.driver.get(url)
+            else:
+                self.driver.get(url)
+
             time.sleep(random.uniform(1.5, 3.0))
         except Exception as e:
             logger.error(f"Failed to navigate to {url}: {e}")

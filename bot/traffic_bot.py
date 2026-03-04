@@ -1,4 +1,5 @@
 import itertools
+import random
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -114,7 +115,9 @@ class TrafficBot:
                     logger.info("Stop requested. No more sessions will be started.")
                     break
 
-                # Submit up to `concurrency` sessions at once
+                # Submit up to `concurrency` sessions at once.
+                # A small random jitter between session launches (0.5–3s) makes
+                # the traffic pattern look organic rather than machine-regular.
                 while (len(futures) < concurrency
                        and session_num < self.config.sessions_count
                        and not _STOP_REQUESTED):
@@ -124,6 +127,11 @@ class TrafficBot:
                     futures[future] = (session_num, target_url)
                     logger.info(f"[Session {session_num}/{self.config.sessions_count}] started "
                                 f"→ {target_url} (active: {len(futures)})")
+                    # Inter-session launch jitter — avoids perfectly uniform
+                    # session-start timestamps that are a strong bot signal
+                    if len(futures) < concurrency and session_num < self.config.sessions_count:
+                        jitter = random.uniform(0.5, 3.0)
+                        time.sleep(jitter)
 
                 # Wait for at least one to finish before submitting more
                 if futures:
