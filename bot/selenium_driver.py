@@ -783,7 +783,8 @@ def resolve_driver_once(chromium_path: Optional[str] = None) -> Optional[str]:
 
     with _driver_path_lock:
         if _driver_path_cache is not None:
-            return _driver_path_cache
+            # "" is the sentinel meaning "use Selenium Manager (no path)"
+            return _driver_path_cache if _driver_path_cache else None
 
         # Try system driver first (no download needed)
         try:
