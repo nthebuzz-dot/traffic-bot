@@ -8,7 +8,6 @@ import subprocess
 import tempfile
 import threading
 import time
-import urllib.parse
 import urllib.request
 from typing import Optional, Tuple
 
@@ -193,14 +192,20 @@ _STEALTH_JS = """
     });
   }
 
-  /* 6. Canvas fingerprint noise — unique per session */
-  const _noise = Math.random() * 0.0001;
+  /* 6. Canvas fingerprint noise — unique per session.
+   *
+   * We XOR the first pixel's R channel with a small random value (1–15).
+   * This is enough to produce a unique canvas hash without visibly
+   * altering the rendered image.  The value is always non-zero so the
+   * XOR always changes the pixel.
+   */
+  const _canvasNoise = Math.floor(Math.random() * 15) + 1;  // 1–15
   const _origToDataURL = HTMLCanvasElement.prototype.toDataURL;
   HTMLCanvasElement.prototype.toDataURL = function (type) {
     const ctx = this.getContext('2d');
     if (ctx) {
       const imageData = ctx.getImageData(0, 0, this.width || 1, this.height || 1);
-      imageData.data[0] = imageData.data[0] ^ Math.floor(_noise * 255);
+      imageData.data[0] = imageData.data[0] ^ _canvasNoise;
       ctx.putImageData(imageData, 0, 0);
     }
     return _origToDataURL.apply(this, arguments);
@@ -208,7 +213,7 @@ _STEALTH_JS = """
   const _origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
   CanvasRenderingContext2D.prototype.getImageData = function (x, y, w, h) {
     const data = _origGetImageData.apply(this, arguments);
-    data.data[0] = data.data[0] ^ Math.floor(_noise * 255);
+    data.data[0] = data.data[0] ^ _canvasNoise;
     return data;
   };
 
