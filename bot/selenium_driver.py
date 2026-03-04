@@ -1,3 +1,5 @@
+import atexit
+import glob
 import json
 import os
 import random
@@ -259,6 +261,88 @@ _proxy_tz_cache: dict = {}
 # Pre-resolved driver path cache (populated by resolve_driver_once())
 _driver_path_cache: Optional[str] = None
 _driver_path_lock = threading.Lock()
+
+# ---------------------------------------------------------------------------
+# Chrome temp-dir cleanup
+#
+# Each session creates a unique temp dir (chrome_tmp_XXXXXX) under the
+# system temp directory.  The SeleniumDriver.quit() method removes it, but
+# if Chrome crashes or the process is killed the dirs are left behind and
+# accumulate over time, consuming disk space.
+#
+# Two safety nets are provided:
+#   1. cleanup_stale_chrome_tmpdirs() — call at bot startup to remove any
+#      dirs left from a previous crash.
+#   2. atexit handler — removes any dirs that are still registered when the
+#      Python process exits normally.
+# ---------------------------------------------------------------------------
+
+# Registry of temp dirs created in this process (for atexit cleanup)
+_active_tmp_dirs: set = set()
+_tmp_dirs_lock = threading.Lock()
+
+
+def _register_tmp_dir(path: str) -> None:
+    """Register a temp dir so it can be cleaned up on exit."""
+    with _tmp_dirs_lock:
+        _active_tmp_dirs.add(path)
+
+
+def _unregister_tmp_dir(path: str) -> None:
+    """Unregister a temp dir (called after successful cleanup)."""
+    with _tmp_dirs_lock:
+        _active_tmp_dirs.discard(path)
+
+
+def _cleanup_registered_tmp_dirs() -> None:
+    """atexit handler — remove any temp dirs still registered at exit."""
+    with _tmp_dirs_lock:
+        dirs = set(_active_tmp_dirs)
+    for d in dirs:
+        try:
+            if os.path.isdir(d):
+                shutil.rmtree(d, ignore_errors=True)
+                logger.debug(f"atexit: removed chrome tmp dir: {d}")
+        except Exception:
+            pass
+
+
+# Register the atexit handler once at module import time
+atexit.register(_cleanup_registered_tmp_dirs)
+
+
+def cleanup_stale_chrome_tmpdirs(tmp_root: Optional[str] = None) -> int:
+    """
+    Remove any leftover ``chrome_tmp_*`` directories from previous runs.
+
+    These are created by SeleniumDriver._build_options() and should be
+    removed by SeleniumDriver.quit(), but if Chrome crashed or the process
+    was killed they are left behind.
+
+    Args:
+        tmp_root: Directory to search (default: system temp dir).
+
+    Returns:
+        Number of directories removed.
+    """
+    root = tmp_root or tempfile.gettempdir()
+    pattern = os.path.join(root, "chrome_tmp_*")
+    removed = 0
+    for d in glob.glob(pattern):
+        # Skip dirs that belong to the current process (still in use)
+        with _tmp_dirs_lock:
+            if d in _active_tmp_dirs:
+                continue
+        try:
+            if os.path.isdir(d):
+                shutil.rmtree(d, ignore_errors=True)
+                removed += 1
+                logger.debug(f"Removed stale chrome tmp dir: {d}")
+        except Exception:
+            pass
+    if removed:
+        logger.info(f"Cleaned up {removed} stale Chrome temp director{'y' if removed == 1 else 'ies'}")
+    return removed
 
 
 def _get_proxy_timezone(proxy_url: Optional[str]) -> Optional[str]:
@@ -804,6 +888,7 @@ class SeleniumDriver:
         # multiple sessions don't collide, and disable the remote
         # debugging port that causes the crash.
         self._tmp_dir = tempfile.mkdtemp(prefix="chrome_tmp_")
+        _register_tmp_dir(self._tmp_dir)   # track for atexit / crash cleanup
         options.add_argument(f"--user-data-dir={self._tmp_dir}")
         options.add_argument("--remote-debugging-port=0")  # 0 = OS picks a free port
 
@@ -1037,4 +1122,18 @@ class SeleniumDriver:
                 shutil.rmtree(self._tmp_dir, ignore_errors=True)
             except Exception:
                 pass
+            _unregister_tmp_dir(self._tmp_dir)
             self._tmp_dir = None
+
+    def __del__(self):
+        """
+        Safety-net destructor — called by the garbage collector if quit()
+        was never called (e.g. due to an unhandled exception or crash).
+
+        Ensures the Chrome process and temp dir are always cleaned up even
+        if the caller forgot to call quit() or the session thread was killed.
+        """
+        try:
+            self.quit()
+        except Exception:
+            pass

@@ -8,7 +8,7 @@ from typing import Dict, Optional
 from bot.cookie_manager import CookieManager
 from bot.logger import setup_logger
 from bot.proxy_manager import ProxyManager
-from bot.selenium_driver import SeleniumDriver, resolve_driver_once
+from bot.selenium_driver import SeleniumDriver, resolve_driver_once, cleanup_stale_chrome_tmpdirs
 from bot.session_simulator import SessionSimulator
 
 logger = setup_logger(__name__)
@@ -69,6 +69,10 @@ class TrafficBot:
     def run(self):
         global _STOP_REQUESTED
         _STOP_REQUESTED = False  # reset on each run
+
+        # Clean up any Chrome temp dirs left over from a previous crash
+        # before starting new sessions (prevents disk accumulation).
+        cleanup_stale_chrome_tmpdirs()
 
         concurrency = max(1, self.config.concurrent_sessions)
         urls = self.config.effective_urls
