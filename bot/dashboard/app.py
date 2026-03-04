@@ -85,6 +85,10 @@ _bot_thread: Optional[threading.Thread] = None
 _bot_instance = None   # live TrafficBot reference for real-time stats
 _bot_lock = threading.Lock()
 
+# Last known stats — kept after the bot finishes so the dashboard still
+# shows the final results instead of resetting to zeros.
+_last_stats: dict = {"completed": 0, "failed": 0, "total": 0, "url_stats": {}}
+
 # ---------------------------------------------------------------------------
 # Broadcast log system
 #
@@ -227,15 +231,24 @@ def bot_status():
 
 @app.route("/api/stats", methods=["GET"])
 def bot_stats():
-    """Return live session counters from the running bot (global + per-URL)."""
+    """
+    Return live session counters from the running bot (global + per-URL).
+
+    When the bot is not running, returns the last known stats so the
+    dashboard continues to show the final results after the run completes.
+    """
     if _bot_instance is not None:
-        return jsonify({
+        stats = {
             "completed":  _bot_instance.sessions_completed,
             "failed":     _bot_instance.sessions_failed,
             "total":      _bot_instance.config.sessions_count,
             "url_stats":  _bot_instance.url_stats,
-        })
-    return jsonify({"completed": 0, "failed": 0, "total": 0, "url_stats": {}})
+        }
+        # Update the persistent cache while the bot is running
+        _last_stats.update(stats)
+        return jsonify(stats)
+    # Bot not running — return last known stats (shows final results)
+    return jsonify(_last_stats)
 
 
 @app.route("/api/start", methods=["POST"])
@@ -254,8 +267,11 @@ def start_bot():
         config = ConfigHandler()
         config.config.update(_current_config)
 
+        # Reset stats for the new run
+        _last_stats.update({"completed": 0, "failed": 0, "total": 0, "url_stats": {}})
+
         def _run():
-            global _bot_instance
+            global _bot_instance, _last_stats
             try:
                 bot = TrafficBot(config)
                 _bot_instance = bot
@@ -263,6 +279,15 @@ def start_bot():
             except Exception as exc:
                 logging.getLogger(__name__).error(f"Bot crashed: {exc}")
             finally:
+                # Save final stats before clearing the instance so the
+                # dashboard continues to show results after the run ends.
+                if _bot_instance is not None:
+                    _last_stats.update({
+                        "completed": _bot_instance.sessions_completed,
+                        "failed":    _bot_instance.sessions_failed,
+                        "total":     _bot_instance.config.sessions_count,
+                        "url_stats": _bot_instance.url_stats,
+                    })
                 _bot_instance = None
 
         _bot_thread = threading.Thread(target=_run, daemon=True, name="bot-worker")

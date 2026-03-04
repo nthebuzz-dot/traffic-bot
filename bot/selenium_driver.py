@@ -13,6 +13,7 @@ from typing import Optional, Tuple
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.support.ui import WebDriverWait
 
 from bot.logger import setup_logger
 
@@ -87,20 +88,24 @@ _DEVICE_PIXEL_RATIOS = [1.0, 1.25, 1.5, 2.0, 2.25, 2.5]
 # rather than all arriving with no referrer (a strong bot signal at scale).
 _REFERRERS = [
     # Google organic search (most common real-world referrer)
+    # Using realistic search queries so the referrer looks natural
     "https://www.google.com/",
-    "https://www.google.com/search?q=",
-    "https://www.google.co.uk/search?q=",
-    "https://www.google.com.au/search?q=",
-    "https://www.google.ca/search?q=",
-    "https://www.google.de/search?q=",
-    "https://www.google.fr/search?q=",
+    "https://www.google.com/search?q=site+review",
+    "https://www.google.com/search?q=best+website",
+    "https://www.google.co.uk/search?q=website+review",
+    "https://www.google.com.au/search?q=top+sites",
+    "https://www.google.ca/search?q=website+tips",
+    "https://www.google.de/search?q=webseite",
+    "https://www.google.fr/search?q=meilleur+site",
     # Bing
-    "https://www.bing.com/search?q=",
+    "https://www.bing.com/search?q=website+review",
+    "https://www.bing.com/search?q=best+sites+2025",
     # DuckDuckGo
-    "https://duckduckgo.com/?q=",
+    "https://duckduckgo.com/?q=website+review",
     # Social
     "https://www.facebook.com/",
-    "https://t.co/",
+    "https://twitter.com/",
+    "https://x.com/",
     "https://www.reddit.com/",
     "https://www.linkedin.com/",
     # Direct (no referrer) — ~20% of real traffic
@@ -174,9 +179,6 @@ _STEALTH_JS = """
   }
 
   /* 5. Permissions — spoof 'notifications' query to return 'default' */
-  const _origQuery = window.Notification
-    ? Notification.requestPermission
-    : null;
   if (navigator.permissions && navigator.permissions.query) {
     const _origPermQuery = navigator.permissions.query.bind(navigator.permissions);
     Object.defineProperty(navigator.permissions, 'query', {
@@ -865,10 +867,12 @@ class SeleniumDriver:
     def _setup_driver(self):
         options = self._build_options()
 
+        # Resolve browser + driver binaries once (reused in both branches below)
+        browser_bin, driver_bin = _resolve_browser_and_driver(self.chromium_path)
+
         # If a pre-resolved driver path was supplied (from resolve_driver_once()),
         # use it directly — skip the per-session resolution to avoid race conditions.
         if self._driver_path:
-            browser_bin, _ = _resolve_browser_and_driver(self.chromium_path)
             if browser_bin:
                 options.binary_location = browser_bin
             try:
@@ -878,9 +882,7 @@ class SeleniumDriver:
                 logger.info("Selenium WebDriver initialised successfully (pre-resolved driver)")
                 return
             except Exception:
-                pass  # fall through to normal resolution
-
-        browser_bin, driver_bin = _resolve_browser_and_driver(self.chromium_path)
+                pass  # fall through to normal resolution below
 
         # Tell Selenium which browser binary to use
         if browser_bin:
@@ -991,18 +993,30 @@ class SeleniumDriver:
             if referrer:
                 # Use CDP Page.navigate with the referrer header so the target
                 # site sees it in the HTTP Referer header.
+                # CDP navigate is asynchronous — we must wait for the page to
+                # finish loading before proceeding.
                 try:
                     self.driver.execute_cdp_cmd(
                         "Page.navigate",
                         {"url": url, "referrer": referrer},
                     )
                     logger.debug(f"Referrer: {referrer}")
+                    # Wait up to 30 s for document.readyState == 'complete'
+                    try:
+                        WebDriverWait(self.driver, 30).until(
+                            lambda d: d.execute_script(
+                                "return document.readyState"
+                            ) == "complete"
+                        )
+                    except Exception:
+                        pass  # timeout or JS error — continue anyway
                 except Exception:
                     # CDP navigate failed — fall back to plain get()
                     self.driver.get(url)
             else:
                 self.driver.get(url)
 
+            # Brief pause after page load (simulates human reading delay)
             time.sleep(random.uniform(1.5, 3.0))
         except Exception as e:
             logger.error(f"Failed to navigate to {url}: {e}")
