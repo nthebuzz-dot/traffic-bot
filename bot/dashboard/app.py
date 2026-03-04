@@ -183,11 +183,17 @@ def save_config():
     data = request.get_json(force=True)
 
     # ------------------------------------------------------------------
-    # Multi-URL: accept either a list or a newline/comma-separated string
+    # Multi-URL: accept either a list or a newline-separated string.
+    #
+    # Each line may contain per-URL referrers in the format:
+    #   "https://target.com | https://ref1.com, https://ref2.com"
+    #
+    # NOTE: We do NOT split on commas here because commas are used as
+    # separators within the referrer part of each URL line.
     # ------------------------------------------------------------------
     raw_urls = data.get("target_urls", [])
     if isinstance(raw_urls, str):
-        raw_urls = [u.strip() for u in raw_urls.replace(",", "\n").splitlines()]
+        raw_urls = [u.strip() for u in raw_urls.splitlines()]
     target_urls = [u for u in raw_urls if u]
 
     # Backwards-compat: also accept the old single target_url field
@@ -196,8 +202,11 @@ def save_config():
         target_urls = [single_url]
 
     _current_config["target_urls"] = target_urls
-    # Keep target_url in sync with the first entry for CLI / old code
-    _current_config["target_url"] = target_urls[0] if target_urls else ""
+    # Keep target_url in sync with the first URL (strip referrer part for compat)
+    first_url = target_urls[0] if target_urls else ""
+    if '|' in first_url:
+        first_url = first_url.split('|', 1)[0].strip()
+    _current_config["target_url"] = first_url
 
     _current_config["sessions_count"] = int(data.get("sessions_count", 10))
     _current_config["concurrent_sessions"] = max(1, int(data.get("concurrent_sessions", 1)))

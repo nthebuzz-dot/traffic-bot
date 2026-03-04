@@ -56,6 +56,10 @@ class TrafficBot:
         for url in config.effective_urls:
             self._url_stats[url] = {"completed": 0, "failed": 0}
 
+        # Per-URL referrer map — populated from "url | ref1, ref2" format
+        # Falls back to global config.referrers when a URL has no specific referrers
+        self._url_referrers: Dict[str, list] = config.url_referrers
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -202,12 +206,16 @@ class TrafficBot:
             if proxy:
                 logger.info(f"[Session {session_num}] Using proxy: {proxy}")
 
+            # Use per-URL referrers if configured, otherwise fall back to global referrers
+            per_url_refs = self._url_referrers.get(target_url, [])
+            effective_referrers = per_url_refs if per_url_refs else (self.config.referrers or [])
+
             driver = SeleniumDriver(
                 headless=self.config.headless,
                 proxy=proxy,
                 chromium_path=self.config.chromium_path,
                 driver_path=pre_driver_path,
-                custom_referrers=self.config.referrers or [],
+                custom_referrers=effective_referrers,
             )
             driver.get(target_url)
 

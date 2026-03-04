@@ -6,6 +6,7 @@ import yaml
 DEFAULTS = {
     'target_url': '',
     'target_urls': [],          # list of URLs; takes priority over target_url
+                                # Each entry may be "url | ref1, ref2" for per-URL referrers
     'sessions_count': 10,
     'concurrent_sessions': 1,
     'session_duration': 45,
@@ -14,8 +15,32 @@ DEFAULTS = {
     'headless': True,
     'chromium_path': None,
     'cookie_dir': None,         # directory for persistent cookie storage (None = default)
-    'referrers': [],            # custom referrer URLs; used for ~80% of sessions
+    'referrers': [],            # global custom referrer URLs; used for ~80% of sessions
+                                # Per-URL referrers override this when set via "url | ref" format
 }
+
+
+def _parse_url_line(line: str):
+    """
+    Parse a URL line that may contain per-URL referrers.
+
+    Supported formats:
+      "https://target.com"
+        → url="https://target.com", referrers=[]
+
+      "https://target.com | https://ref1.com, https://ref2.com"
+        → url="https://target.com", referrers=["https://ref1.com", "https://ref2.com"]
+
+    Returns:
+        (url_str, referrer_list)  where referrer_list may be empty.
+    """
+    if '|' in line:
+        parts = line.split('|', 1)
+        url = parts[0].strip()
+        refs_raw = parts[1].strip()
+        refs = [r.strip() for r in refs_raw.replace(',', '\n').splitlines() if r.strip()]
+        return url, refs
+    return line.strip(), []
 
 
 class ConfigHandler:
@@ -53,17 +78,44 @@ class ConfigHandler:
     @property
     def effective_urls(self) -> list:
         """
-        Return the canonical list of target URLs.
+        Return the canonical list of target URLs (without referrer suffixes).
 
         Priority:
-          1. target_urls list (if non-empty)
+          1. target_urls list (if non-empty) — each entry may be "url | ref1, ref2"
           2. target_url single string (backwards-compat)
         """
-        urls = [u.strip() for u in (self.config.get('target_urls') or []) if u and u.strip()]
-        if urls:
-            return urls
+        raw = [u.strip() for u in (self.config.get('target_urls') or []) if u and u.strip()]
+        if raw:
+            return [_parse_url_line(u)[0] for u in raw if _parse_url_line(u)[0]]
         single = (self.config.get('target_url') or '').strip()
-        return [single] if single else []
+        if single:
+            return [_parse_url_line(single)[0]]
+        return []
+
+    @property
+    def url_referrers(self) -> dict:
+        """
+        Return a dict mapping each target URL to its per-URL referrer list.
+
+        When a URL line contains "url | ref1, ref2", those referrers are
+        used for that URL instead of the global referrers list.
+
+        Returns:
+            {url: [referrer, ...]}  — empty list means "use global referrers"
+        """
+        raw = [u.strip() for u in (self.config.get('target_urls') or []) if u and u.strip()]
+        result = {}
+        for entry in raw:
+            url, refs = _parse_url_line(entry)
+            if url:
+                result[url] = refs
+        # Also handle the legacy single target_url
+        single = (self.config.get('target_url') or '').strip()
+        if single and single not in result:
+            url, refs = _parse_url_line(single)
+            if url:
+                result[url] = refs
+        return result
 
     # ------------------------------------------------------------------
     # Attribute-style access (used by TrafficBot and CLI)

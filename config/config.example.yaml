@@ -1,7 +1,17 @@
 # Example configuration for Web Traffic Bot
 # Copy to config.yaml and edit as needed for your target site
 
+# Single URL (simple)
 target_url: "https://example.com"
+
+# Multiple URLs with per-URL referrers (recommended for advanced use)
+# Format: "url | referrer1, referrer2, ..."
+# The referrers after | are used for ~80% of sessions to that URL.
+# Leave out the | part to use the global 'referrers' list below.
+# target_urls:
+#   - "https://example.com | https://yourblog.com, https://twitter.com/"
+#   - "https://example.com/blog | https://yourforum.com/thread/1"
+#   - "https://example.com/contact"   # uses global referrers
 
 # Total number of browser sessions to run
 sessions_count: 10

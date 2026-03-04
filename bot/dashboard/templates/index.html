@@ -388,9 +388,14 @@
       <!-- Multi-URL input -->
       <div class="form-group">
         <label>Target URLs <span style="color:var(--muted);font-size:.75rem;">(one per line)</span></label>
-        <textarea id="target_urls" rows="4"
-          placeholder="https://yoursite.com&#10;https://yoursite.com/blog&#10;https://yoursite.com/contact">{{ urls_str }}</textarea>
-        <div class="field-hint">Add multiple URLs — sessions are distributed across them in round-robin order.</div>
+        <textarea id="target_urls" rows="5"
+          placeholder="https://yoursite.com&#10;https://yoursite.com/blog | https://yourblog.com, https://twitter.com/&#10;https://yoursite.com/contact | https://yourforum.com/thread/1">{{ urls_str }}</textarea>
+        <div class="field-hint">
+          One URL per line. To set <strong>per-URL referrers</strong>, add
+          <code style="background:var(--bg);padding:.1rem .3rem;border-radius:3px;font-size:.75rem;">| referrer1, referrer2</code>
+          after the URL — e.g.
+          <code style="background:var(--bg);padding:.1rem .3rem;border-radius:3px;font-size:.75rem;">https://yoursite.com | https://yourblog.com</code>
+        </div>
       </div>
 
       <div class="row-2">
