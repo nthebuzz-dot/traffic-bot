@@ -413,7 +413,12 @@ def _get_proxy_timezone(proxy_url: Optional[str]) -> Optional[str]:
 # NOTE: On Ubuntu 22.04+, /usr/bin/chromium-browser is a STUB that just says
 # "install the snap". We must NOT use it. The real apt binary is /usr/bin/chromium.
 _KNOWN_PAIRS = [
-    # Debian/Ubuntu apt package (22.04+ non-snap) — check BEFORE chromium-browser
+    # Debian/Ubuntu apt package (22.04+ non-snap) — check BEFORE chromium-browser.
+    # The apt chromium-driver package installs chromedriver at /usr/bin/chromedriver
+    # BUT after snap removal, that path may be a broken snap stub.
+    # We check /usr/lib/chromium/chromedriver first (the real apt binary location),
+    # then fall back to /usr/bin/chromedriver (validated by _binary_exists).
+    ("/usr/bin/chromium",               "/usr/lib/chromium/chromedriver"),
     ("/usr/bin/chromium",               "/usr/bin/chromedriver"),
     # Debian/Ubuntu apt package (20.04) — only valid if it's a real binary, not a stub
     ("/usr/bin/chromium-browser",       "/usr/lib/chromium-browser/chromedriver"),
@@ -429,9 +434,13 @@ _SNAP_BROWSER_PATHS = [
 ]
 
 # Stub script paths — Ubuntu 22.04+ installs these as snap redirectors.
-# They are NOT real browsers and must be skipped.
+# They are NOT real browsers/drivers and must be skipped.
+# After 'sudo snap remove chromium', snap leaves behind stub files at these
+# paths that reference the now-removed snap and will fail when executed.
 _STUB_PATHS = [
     "/usr/bin/chromium-browser",   # Ubuntu 22.04+ stub → "install snap chromium"
+    "/usr/bin/chromedriver",       # snap chromedriver stub (left after snap removal)
+    "/usr/bin/chromium-chromedriver",  # snap chromedriver stub variant
 ]
 
 # Standalone driver candidates (used when browser is found but driver is None above)
@@ -466,21 +475,46 @@ def _is_snap_stub(path: str) -> bool:
 
 
 def _binary_exists(path: str) -> bool:
-    """Return True if *path* is a real executable (not a snap stub)."""
+    """
+    Return True if *path* is a real, working executable (not a snap stub).
+
+    Checks:
+    1. File exists and is executable
+    2. Not a known snap stub path with snap-redirect content
+    3. For chromedriver candidates: actually runs successfully (--version)
+       This catches broken snap stubs that are ELF binaries referencing
+       the now-removed snap (they exist and are executable but fail to run).
+    """
     if not (bool(path) and os.path.isfile(path) and os.access(path, os.X_OK)):
         return False
-    # Skip Ubuntu 22.04+ snap redirect stubs
+    # Skip known snap redirect stubs (shell scripts)
     if path in _STUB_PATHS and _is_snap_stub(path):
         logger.debug(f"Skipping snap stub: {path}")
         return False
+    # For chromedriver binaries, verify they actually execute.
+    # A broken snap stub (ELF binary) will fail with a non-zero exit code
+    # or an error message referencing snap.
+    if "chromedriver" in os.path.basename(path).lower():
+        try:
+            result = subprocess.run(
+                [path, "--version"],
+                capture_output=True, timeout=5
+            )
+            output = (result.stdout + result.stderr).decode("utf-8", errors="ignore").lower()
+            if result.returncode != 0 or "snap" in output or "error" in output:
+                logger.debug(f"Skipping non-functional chromedriver: {path} (exit={result.returncode})")
+                return False
+        except Exception as e:
+            logger.debug(f"Skipping chromedriver that failed to run: {path} ({e})")
+            return False
     return True
 
 
 def _find_on_path(candidates: list) -> Optional[str]:
-    """Return the first candidate found on PATH, or None."""
+    """Return the first candidate found on PATH that actually works."""
     for name in candidates:
         path = shutil.which(name)
-        if path:
+        if path and _binary_exists(path):
             return path
     return None
 
